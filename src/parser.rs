@@ -36,6 +36,26 @@ pub struct Parser {
 }
 
 impl Parser {
+    fn push_error(&mut self, msg: String) {
+        let line_num = self.lexer.line;
+        let col_num = self.lexer.column;
+        
+        let mut error_msg = format!("[Line {}, Col {}] {}", line_num, col_num, msg);
+        
+        if let Some(line_content) = self.lexer.get_line(line_num) {
+            error_msg.push('\n');
+            error_msg.push_str("    |\n");
+            error_msg.push_str(&format!("{:3} | {}\n", line_num, line_content));
+            error_msg.push_str("    | ");
+            for _ in 0..col_num.saturating_sub(1) {
+                error_msg.push(' ');
+            }
+            error_msg.push_str("^^^\n");
+        }
+        
+        self.errors.push(error_msg);
+    }
+
     pub fn new(mut lexer: Lexer) -> Parser {
         let cur_token = lexer.next_token();
         let peek_token = lexer.next_token();
@@ -103,7 +123,7 @@ impl Parser {
         let name = match &self.cur_token {
             Token::Ident(name) => name.clone(),
             _ => {
-                self.errors.push("Expected function name".to_string());
+                self.push_error("Expected function name".to_string());
                 return None;
             }
         };
@@ -121,7 +141,7 @@ impl Parser {
         }
         
         if self.peek_token != Token::LBrace {
-            self.errors.push("Expected { after function parameters".to_string());
+            self.push_error("Expected { after function parameters".to_string());
             return None;
         }
         self.next_token(); 
@@ -182,7 +202,7 @@ impl Parser {
         }
         
         if self.peek_token != Token::RParen {
-            self.errors.push(format!("Expected ) for parameters, got {:?}", self.peek_token));
+            self.push_error(format!("Expected ) for parameters, got {:?}", self.peek_token));
             return None;
         }
         self.next_token(); 
@@ -256,7 +276,7 @@ impl Parser {
             Token::LBracket => self.parse_array_literal(),
             Token::LBrace => self.parse_hash_literal(),
             _ => {
-                self.errors.push(format!("No prefix parse function for {:?}", self.cur_token));
+                self.push_error(format!("No prefix parse function for {:?}", self.cur_token));
                 None
             }
         }?;
@@ -290,7 +310,7 @@ impl Parser {
         let condition = self.parse_expression(Precedence::Lowest)?;
         
         if self.peek_token != Token::LBrace {
-            self.errors.push("Expected { after if condition".to_string());
+            self.push_error("Expected { after if condition".to_string());
             return None;
         }
         self.next_token(); // Move to "{"
@@ -302,7 +322,7 @@ impl Parser {
             self.next_token(); // Move to "else"
             
             if self.peek_token != Token::LBrace {
-                self.errors.push("Expected { after else".to_string());
+                self.push_error("Expected { after else".to_string());
                 return None;
             }
             self.next_token(); // Move to "{"
@@ -323,7 +343,7 @@ impl Parser {
         let condition = self.parse_expression(Precedence::Lowest)?;
 
         if self.peek_token != Token::LBrace {
-            self.errors.push("Expected { after while condition".to_string());
+            self.push_error("Expected { after while condition".to_string());
             return None;
         }
         self.next_token(); // Move to '{'
@@ -342,14 +362,14 @@ impl Parser {
         let variable = match &self.cur_token {
             Token::Ident(name) => name.clone(),
             _ => {
-                self.errors.push(format!("Expected identifier after for, got {:?}", self.cur_token));
+                self.push_error(format!("Expected identifier after for, got {:?}", self.cur_token));
                 return None;
             }
         };
         self.next_token(); 
 
         if self.cur_token != Token::In {
-            self.errors.push(format!("Expected 'in' after for variable, got {:?}", self.cur_token));
+            self.push_error(format!("Expected 'in' after for variable, got {:?}", self.cur_token));
             return None;
         }
         self.next_token(); 
@@ -357,7 +377,7 @@ impl Parser {
         let iterable = self.parse_expression(Precedence::Lowest)?;
 
         if self.peek_token != Token::LBrace {
-            self.errors.push("Expected { after for iterable".to_string());
+            self.push_error("Expected { after for iterable".to_string());
             return None;
         }
         self.next_token(); // Move to '{'
@@ -377,7 +397,7 @@ impl Parser {
         let value = self.parse_expression(Precedence::Lowest)?;
 
         if self.peek_token != Token::LBrace {
-            self.errors.push(format!("Expected {{ after match value, got {:?}", self.peek_token));
+            self.push_error(format!("Expected {{ after match value, got {:?}", self.peek_token));
             return None;
         }
         self.next_token(); // move to '{'
@@ -389,7 +409,7 @@ impl Parser {
             let pattern = self.parse_expression(Precedence::Lowest)?;
 
             if self.peek_token != Token::FatArrow {
-                self.errors.push(format!("Expected => after match pattern, got {:?}", self.peek_token));
+                self.push_error(format!("Expected => after match pattern, got {:?}", self.peek_token));
                 return None;
             }
             self.next_token(); // move to '=>'
@@ -429,14 +449,14 @@ impl Parser {
         self.next_token(); // Move past 'try'
 
         if self.cur_token != Token::LBrace {
-            self.errors.push(format!("Expected {{ after try, got {:?}", self.cur_token));
+            self.push_error(format!("Expected {{ after try, got {:?}", self.cur_token));
             return None;
         }
 
         let try_body = self.parse_block_statement();
 
         if self.peek_token != Token::Catch {
-            self.errors.push(format!("Expected catch after try block, got {:?}", self.peek_token));
+            self.push_error(format!("Expected catch after try block, got {:?}", self.peek_token));
             return None;
         }
         self.next_token(); // Move to 'catch'
@@ -445,13 +465,13 @@ impl Parser {
         let catch_param = match &self.cur_token {
             Token::Ident(name) => name.clone(),
             _ => {
-                self.errors.push(format!("Expected identifier after catch, got {:?}", self.cur_token));
+                self.push_error(format!("Expected identifier after catch, got {:?}", self.cur_token));
                 return None;
             }
         };
 
         if self.peek_token != Token::LBrace {
-            self.errors.push(format!("Expected {{ after catch parameter, got {:?}", self.peek_token));
+            self.push_error(format!("Expected {{ after catch parameter, got {:?}", self.peek_token));
             return None;
         }
         self.next_token(); // move to '{'
@@ -469,7 +489,7 @@ impl Parser {
         self.next_token(); // Move past 'func'
         
         if self.cur_token != Token::LParen {
-            self.errors.push(format!("Expected ( for function parameters, got {:?}", self.cur_token));
+            self.push_error(format!("Expected ( for function parameters, got {:?}", self.cur_token));
             return None;
         }
         
@@ -485,7 +505,7 @@ impl Parser {
         }
         
         if self.peek_token != Token::LBrace {
-            self.errors.push("Expected { for function body".to_string());
+            self.push_error("Expected { for function body".to_string());
             return None;
         }
         self.next_token();
@@ -522,7 +542,7 @@ impl Parser {
         let exp = self.parse_expression(Precedence::Lowest)?;
 
         if self.peek_token != Token::RParen {
-            self.errors.push(format!("Expected ) but got {:?}", self.peek_token));
+            self.push_error(format!("Expected ) but got {:?}", self.peek_token));
             return None;
         }
         self.next_token(); // Move past ')'
@@ -616,7 +636,7 @@ impl Parser {
         }
 
         if self.peek_token != Token::RBracket {
-            self.errors.push(format!("Expected ] for array, got {:?}", self.peek_token));
+            self.push_error(format!("Expected ] for array, got {:?}", self.peek_token));
             return None;
         }
         self.next_token(); // Move to ']'
@@ -637,7 +657,7 @@ impl Parser {
             let key = self.parse_expression(Precedence::Lowest)?;
 
             if self.peek_token != Token::Colon {
-                self.errors.push(format!("Expected : after hash key, got {:?}", self.peek_token));
+                self.push_error(format!("Expected : after hash key, got {:?}", self.peek_token));
                 return None;
             }
             self.next_token(); // move to ':'
@@ -647,7 +667,7 @@ impl Parser {
             pairs.push((key, value));
 
             if self.peek_token != Token::RBrace && self.peek_token != Token::Comma {
-                self.errors.push(format!("Expected }} or , after hash pair, got {:?}", self.peek_token));
+                self.push_error(format!("Expected }} or , after hash pair, got {:?}", self.peek_token));
                 return None;
             }
 
@@ -670,7 +690,7 @@ impl Parser {
         let index = self.parse_expression(Precedence::Lowest)?;
 
         if self.peek_token != Token::RBracket {
-            self.errors.push(format!("Expected ] for array index, got {:?}", self.peek_token));
+            self.push_error(format!("Expected ] for array index, got {:?}", self.peek_token));
             return None;
         }
         self.next_token(); // move past ]

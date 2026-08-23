@@ -5,6 +5,8 @@ pub struct Lexer {
     position: usize,      // current position in input (points to current char)
     read_position: usize, // current reading position in input (after current char)
     ch: char,             // current char under examination
+    pub line: usize,
+    pub column: usize,
 }
 
 impl Lexer {
@@ -14,12 +16,19 @@ impl Lexer {
             position: 0,
             read_position: 0,
             ch: '\0',
+            line: 1,
+            column: 0,
         };
         lexer.read_char();
         lexer
     }
 
     fn read_char(&mut self) {
+        if self.ch == '\n' {
+            self.line += 1;
+            self.column = 0;
+        }
+
         if self.read_position >= self.input.len() {
             self.ch = '\0';
         } else {
@@ -27,6 +36,7 @@ impl Lexer {
         }
         self.position = self.read_position;
         self.read_position += 1;
+        self.column += 1;
     }
 
     fn peek_char(&self) -> char {
@@ -193,5 +203,27 @@ impl Lexer {
             "throw" => Token::Throw,
             _ => Token::Ident(ident.to_string()),
         }
+    }
+
+    pub fn get_line(&self, line_num: usize) -> Option<String> {
+        let mut current_line = 1;
+        let mut start_idx = 0;
+        
+        for (i, &c) in self.input.iter().enumerate() {
+            if current_line == line_num {
+                if c == '\n' {
+                    return Some(self.input[start_idx..i].iter().collect());
+                }
+            } else if c == '\n' {
+                current_line += 1;
+                start_idx = i + 1;
+            }
+        }
+        
+        if current_line == line_num && start_idx < self.input.len() {
+            return Some(self.input[start_idx..].iter().collect());
+        }
+        
+        None
     }
 }
