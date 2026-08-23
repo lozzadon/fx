@@ -188,6 +188,9 @@ impl Lexer {
             "for" => Token::For,
             "in" => Token::In,
             "match" => Token::Match,
+            "try" => Token::Try,
+            "catch" => Token::Catch,
+            "throw" => Token::Throw,
             _ => Token::Ident(ident.to_string()),
         }
     }

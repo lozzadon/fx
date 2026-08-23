@@ -250,6 +250,8 @@ impl Parser {
             Token::While => self.parse_while_expression(),
             Token::For => self.parse_for_expression(),
             Token::Match => self.parse_match_expression(),
+            Token::Try => self.parse_try_expression(),
+            Token::Throw => self.parse_throw_expression(),
             Token::Func => self.parse_function_literal(),
             Token::LBracket => self.parse_array_literal(),
             Token::LBrace => self.parse_hash_literal(),
@@ -414,6 +416,52 @@ impl Parser {
         Some(Expression::Match {
             value: Box::new(value),
             cases,
+        })
+    }
+
+    fn parse_throw_expression(&mut self) -> Option<Expression> {
+        self.next_token(); // Move past 'throw'
+        let exp = self.parse_expression(Precedence::Lowest)?;
+        Some(Expression::Throw(Box::new(exp)))
+    }
+
+    fn parse_try_expression(&mut self) -> Option<Expression> {
+        self.next_token(); // Move past 'try'
+
+        if self.cur_token != Token::LBrace {
+            self.errors.push(format!("Expected {{ after try, got {:?}", self.cur_token));
+            return None;
+        }
+
+        let try_body = self.parse_block_statement();
+
+        if self.peek_token != Token::Catch {
+            self.errors.push(format!("Expected catch after try block, got {:?}", self.peek_token));
+            return None;
+        }
+        self.next_token(); // Move to 'catch'
+        self.next_token(); // Move to identifier
+
+        let catch_param = match &self.cur_token {
+            Token::Ident(name) => name.clone(),
+            _ => {
+                self.errors.push(format!("Expected identifier after catch, got {:?}", self.cur_token));
+                return None;
+            }
+        };
+
+        if self.peek_token != Token::LBrace {
+            self.errors.push(format!("Expected {{ after catch parameter, got {:?}", self.peek_token));
+            return None;
+        }
+        self.next_token(); // move to '{'
+
+        let catch_body = self.parse_block_statement();
+
+        Some(Expression::TryCatch {
+            try_body: Box::new(try_body),
+            catch_param,
+            catch_body: Box::new(catch_body),
         })
     }
 

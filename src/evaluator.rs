@@ -246,8 +246,24 @@ fn eval_expression(expression: Expression, env: Rc<RefCell<Environment>>) -> Obj
                     return eval_statement(*body, env);
                 }
             }
-
-            Object::Null // if no match is found, return null
+            Object::Null
+        }
+        Expression::Throw(exp) => {
+            let result = eval_expression(*exp, env);
+            if let Object::Error(_) = result {
+                return result;
+            }
+            Object::Error(format!("{}", result))
+        }
+        Expression::TryCatch { try_body, catch_param, catch_body } => {
+            let result = eval_statement(*try_body, Rc::clone(&env));
+            if let Object::Error(msg) = result {
+                let catch_env = Rc::new(RefCell::new(Environment::new_enclosed(env)));
+                catch_env.borrow_mut().set(catch_param, Object::String(msg), false);
+                eval_statement(*catch_body, catch_env)
+            } else {
+                result // Return the result of try_body if no error
+            }
         }
         Expression::FunctionLiteral { parameters, return_type, body, .. } => {
             Object::Function {

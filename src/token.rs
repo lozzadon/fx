@@ -20,6 +20,9 @@ pub enum Token {
     For,    // for
     In,     // in
     Match,  // match
+    Try,    // try
+    Catch,  // catch
+    Throw,  // throw
 
     // Operators
     Assign,      // =

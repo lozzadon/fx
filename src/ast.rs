@@ -65,6 +65,12 @@ pub enum Expression {
         value: Box<Expression>,
         cases: Vec<(Expression, Box<Statement>)>, // (pattern, consequence)
     },
+    TryCatch {
+        try_body: Box<Statement>,
+        catch_param: String,
+        catch_body: Box<Statement>,
+    },
+    Throw(Box<Expression>),
 }
 
 #[derive(Debug)]
