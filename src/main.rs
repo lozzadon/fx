@@ -4,6 +4,10 @@ mod lexer;
 mod object;
 mod parser;
 mod token;
+mod code;
+mod compiler;
+mod vm;
+mod formatter;
 
 use std::env;
 use std::fs;
@@ -19,13 +23,49 @@ fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() > 1 {
-        // Run a file
-        let filename = &args[1];
-        run_file(filename);
+        if args[1] == "fmt" {
+            if args.len() < 3 {
+                eprintln!("Usage: fx fmt <file.fx>");
+                std::process::exit(1);
+            }
+            format_file(&args[2]);
+        } else {
+            // Run a file
+            let filename = &args[1];
+            run_file(filename);
+        }
     } else {
         // Start REPL
         start_repl();
     }
+}
+
+fn format_file(filename: &str) {
+    let contents = fs::read_to_string(filename).unwrap_or_else(|err| {
+        eprintln!("Error reading {}: {}", filename, err);
+        std::process::exit(1);
+    });
+
+    let lexer = Lexer::new(&contents);
+    let mut parser = Parser::new(lexer);
+    let program = parser.parse_program();
+
+    if !parser.errors.is_empty() {
+        eprintln!("Cannot format {}; there are syntax errors:", filename);
+        for msg in parser.errors {
+            eprintln!("\t{}", msg);
+        }
+        std::process::exit(1);
+    }
+
+    let formatted = formatter::format_program(&program);
+    
+    if let Err(err) = fs::write(filename, formatted) {
+        eprintln!("Error writing formatted file {}: {}", filename, err);
+        std::process::exit(1);
+    }
+    
+    println!("Successfully formatted {}", filename);
 }
 
 fn run_file(filename: &str) {
