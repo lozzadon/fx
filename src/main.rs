@@ -58,26 +58,39 @@ fn run_file(filename: &str) {
     }
 }
 
+use rustyline::error::ReadlineError;
+use rustyline::DefaultEditor;
+use std::path::PathBuf;
+
 fn start_repl() {
     println!("Welcome to the f(x) programming language!");
     println!("We are now running live! Try storing a variable and then typing its name.");
     println!("Example: \n  >> let my_score = 100 \n  >> my_score");
     println!("(Type 'exit' to quit)");
 
-    let stdin = io::stdin();
-    let env = Rc::new(RefCell::new(Environment::new()));
+    let mut rl = DefaultEditor::new().expect("Failed to initialize rustyline");
+    let history_path = env::var("HOME").map(|h| format!("{}/.fx_history", h)).unwrap_or_else(|_| ".fx_history".to_string());
+    
+    if rl.load_history(&history_path).is_err() {
+        println!("No previous history.");
+    }
+
+    let env_ctx = Rc::new(RefCell::new(Environment::new()));
     
     loop {
-        print!(">> ");
-        io::stdout().flush().unwrap();
-
-        let mut input = String::new();
-        match stdin.read_line(&mut input) {
-            Ok(0) => break, // EOF
-            Ok(_) => {
-                if input.trim() == "exit" {
+        let readline = rl.readline(">> ");
+        match readline {
+            Ok(line) => {
+                let input = line.trim();
+                if input.is_empty() {
+                    continue;
+                }
+                
+                if input == "exit" {
                     break;
                 }
+                
+                rl.add_history_entry(input).unwrap();
                 
                 let lexer = Lexer::new(&input);
                 let mut parser = Parser::new(lexer);
@@ -91,17 +104,29 @@ fn start_repl() {
                     continue;
                 }
 
-                let result = eval_program(program, Rc::clone(&env));
+                let result = eval_program(program, Rc::clone(&env_ctx));
                 
                 match result {
                     crate::object::Object::Null => {},
                     _ => println!("{}", result),
                 }
             }
-            Err(e) => {
-                eprintln!("Error reading input: {}", e);
-                break;
+            Err(ReadlineError::Interrupted) => {
+                println!("CTRL-C");
+                break
+            }
+            Err(ReadlineError::Eof) => {
+                println!("CTRL-D");
+                break
+            }
+            Err(err) => {
+                println!("Error: {:?}", err);
+                break
             }
         }
+    }
+    
+    if let Err(err) = rl.save_history(&history_path) {
+        println!("Failed to save history: {}", err);
     }
 }
