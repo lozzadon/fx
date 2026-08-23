@@ -1,7 +1,11 @@
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::fs;
 use crate::ast::{Expression, Program, Statement};
-use crate::object::{Environment, Object};
+use crate::object::{Environment, HashKey, Object};
+use crate::lexer::Lexer;
+use crate::parser::Parser;
+use std::collections::HashMap;
 
 pub fn eval_program(program: Program, env: Rc<RefCell<Environment>>) -> Object {
     let mut result = Object::Null;
@@ -464,6 +468,40 @@ fn apply_builtin(name: &str, args: Vec<Object>) -> Object {
                 accumulator
             } else {
                 Object::Error(format!("first argument to `reduce` must be ARRAY, got {}", args[0]))
+            }
+        }
+        "import" => {
+            if args.len() != 1 {
+                return Object::Error(format!("wrong number of arguments for import. got={}, want=1", args.len()));
+            }
+            if let Object::String(filename) = &args[0] {
+                match fs::read_to_string(filename) {
+                    Ok(contents) => {
+                        let mut lexer = Lexer::new(&contents);
+                        let mut parser = Parser::new(lexer);
+                        let program = parser.parse_program();
+                        
+                        if !parser.errors.is_empty() {
+                            return Object::Error(format!("parse errors in {}:\n{}", filename, parser.errors.join("\n")));
+                        }
+                        
+                        let module_env = Rc::new(RefCell::new(Environment::new()));
+                        let eval_result = eval_program(program, Rc::clone(&module_env));
+                        if let Object::Error(_) = eval_result {
+                            return eval_result;
+                        }
+                        
+                        let mut exports = HashMap::new();
+                        for (k, (v, _)) in module_env.borrow().get_all().iter() {
+                            exports.insert(HashKey::String(k.clone()), v.clone());
+                        }
+                        
+                        Object::Hash(exports)
+                    }
+                    Err(e) => Object::Error(format!("could not read file {}: {}", filename, e)),
+                }
+            } else {
+                Object::Error(format!("argument to `import` must be STRING, got {}", args[0]))
             }
         }
         _ => Object::Error(format!("builtin function not found: {}", name)),

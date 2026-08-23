@@ -120,6 +120,7 @@ impl Environment {
         store.insert("map".to_string(), (Object::Builtin("map".to_string()), false));
         store.insert("filter".to_string(), (Object::Builtin("filter".to_string()), false));
         store.insert("reduce".to_string(), (Object::Builtin("reduce".to_string()), false));
+        store.insert("import".to_string(), (Object::Builtin("import".to_string()), false));
         
         Environment {
             store,
@@ -159,18 +160,23 @@ impl Environment {
         val
     }
     
-    pub fn assign(&mut self, name: &str, val: Object) -> Result<Object, String> {
-        if let Some(entry) = self.store.get_mut(name) {
-            if entry.1 {
-                entry.0 = val.clone();
-                Ok(val)
+    pub fn assign(&mut self, name: &str, value: Object) -> Result<(), String> {
+        if let Some((_, is_mutable)) = self.store.get(name) {
+            if *is_mutable {
+                self.store.insert(name.to_string(), (value, true));
+                return Ok(());
             } else {
-                Err(format!("cannot assign to immutable variable '{}'", name))
+                return Err(format!("cannot assign to immutable variable '{}'", name));
             }
-        } else if let Some(outer_env) = &self.outer {
-            outer_env.borrow_mut().assign(name, val)
-        } else {
-            Err(format!("identifier not found: {}", name))
         }
+
+        match &self.outer {
+            Some(outer) => outer.borrow_mut().assign(name, value),
+            None => Err(format!("variable '{}' not found", name)),
+        }
+    }
+
+    pub fn get_all(&self) -> HashMap<String, (Object, bool)> {
+        self.store.clone()
     }
 }
