@@ -3,6 +3,7 @@ pub mod fs;
 pub mod json;
 pub mod os;
 pub mod time;
+pub mod topia;
 
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -60,20 +61,23 @@ pub fn load_std_module(path: &str) -> Option<Object> {
             }
         }
         "time" => Some(time::make_module()),
+        "topia" => Some(topia::make_module()),
         _ => None,
     }
 }
 
 pub fn apply_std_builtin(full_name: &str, args: Vec<Object>) -> Option<Object> {
-    if !full_name.starts_with("std:") {
+    let clean = if let Some(stripped) = full_name.strip_prefix("std:") {
+        stripped
+    } else {
+        full_name
+    };
+    let parts: Vec<&str> = clean.splitn(2, ':').collect();
+    if parts.len() != 2 {
         return None;
     }
-    let parts: Vec<&str> = full_name.splitn(3, ':').collect();
-    if parts.len() != 3 {
-        return None;
-    }
-    let module = parts[1];
-    let func = parts[2];
+    let module = parts[0];
+    let func = parts[1];
 
     let result = match module {
         "math" => math::apply(func, args),
@@ -81,6 +85,7 @@ pub fn apply_std_builtin(full_name: &str, args: Vec<Object>) -> Option<Object> {
         "json" => json::apply(func, args),
         "os" => os::apply(func, args),
         "time" => time::apply(func, args),
+        "topia" => topia::apply(func, args),
         _ => return None,
     };
     Some(result)

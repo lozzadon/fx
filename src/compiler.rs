@@ -1,11 +1,15 @@
 use crate::ast::{Expression, Program, Statement};
 use crate::code::{make, Opcode, Instructions};
-use crate::object::Object;
+use crate::object::{Object, Environment};
 use std::collections::HashMap;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 pub struct Bytecode {
     pub instructions: Instructions,
     pub constants: Vec<Object>,
+    pub symbol_names: Vec<String>,
+    pub env: Rc<RefCell<Environment>>,
 }
 
 pub const BUILTINS: &[&str] = &[
@@ -27,6 +31,7 @@ pub struct Symbol {
 pub struct SymbolTable {
     pub store: HashMap<String, Symbol>,
     pub num_definitions: usize,
+    pub symbol_names: Vec<String>,
 }
 
 impl SymbolTable {
@@ -34,6 +39,7 @@ impl SymbolTable {
         SymbolTable {
             store: HashMap::new(),
             num_definitions: 0,
+            symbol_names: Vec::new(),
         }
     }
     
@@ -43,7 +49,8 @@ impl SymbolTable {
             sym.index
         } else {
             let index = self.num_definitions;
-            self.store.insert(name, Symbol { index, is_mutable });
+            self.store.insert(name.clone(), Symbol { index, is_mutable });
+            self.symbol_names.push(name);
             self.num_definitions += 1;
             index
         }
@@ -58,6 +65,7 @@ pub struct Compiler {
     pub instructions: Instructions,
     pub constants: Vec<Object>,
     pub symbol_table: SymbolTable,
+    pub env: Rc<RefCell<Environment>>,
 }
 
 impl Compiler {
@@ -66,6 +74,7 @@ impl Compiler {
             instructions: Vec::new(),
             constants: Vec::new(),
             symbol_table: SymbolTable::new(),
+            env: Rc::new(RefCell::new(Environment::new())),
         }
     }
 
@@ -85,6 +94,7 @@ impl Compiler {
             Statement::Let { name, value, is_mutable } => {
                 self.compile_expression(value)?;
                 let symbol_index = self.symbol_table.define(name.clone(), *is_mutable);
+                self.env.borrow_mut().set(name.clone(), Object::Null, *is_mutable);
                 self.emit(Opcode::OpSetGlobal, &[symbol_index]);
             }
             Statement::Assign { name, value } => {
@@ -331,6 +341,16 @@ impl Compiler {
                     self.symbol_table.store.remove(variable);
                 }
             }
+            Expression::FunctionLiteral { parameters, return_type, body, .. } => {
+                let func_obj = Object::Function {
+                    parameters: parameters.clone(),
+                    return_type: return_type.clone(),
+                    body: *body.clone(),
+                    env: Rc::clone(&self.env),
+                };
+                let const_idx = self.add_constant(func_obj);
+                self.emit(Opcode::OpConstant, &[const_idx]);
+            }
             _ => return Err(format!("Unsupported expression in VM compilation: {:?}", e)),
         }
         Ok(())
@@ -357,6 +377,8 @@ impl Compiler {
         Bytecode {
             instructions: self.instructions,
             constants: self.constants,
+            symbol_names: self.symbol_table.symbol_names,
+            env: self.env,
         }
     }
 }

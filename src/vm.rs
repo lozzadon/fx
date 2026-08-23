@@ -1,5 +1,5 @@
 use crate::compiler::Bytecode;
-use crate::object::Object;
+use crate::object::{Object, Environment};
 use crate::code::{Opcode, Instructions};
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -21,6 +21,8 @@ pub struct VM {
     stack: Vec<Object>,
     sp: usize, // Stack pointer
     pub globals: Vec<Object>,
+    pub symbol_names: Vec<String>,
+    pub env: Rc<RefCell<Environment>>,
     pub last_popped: Option<Object>,
 }
 
@@ -32,6 +34,8 @@ impl VM {
             stack: vec![Object::Null; STACK_SIZE],
             sp: 0,
             globals: vec![Object::Null; 65536],
+            symbol_names: bytecode.symbol_names,
+            env: bytecode.env,
             last_popped: None,
         }
     }
@@ -51,7 +55,11 @@ impl VM {
                     let const_index = ((self.instructions[ip + 1] as usize) << 8) | (self.instructions[ip + 2] as usize);
                     ip += 2;
                     
-                    self.push(self.constants[const_index].clone())?;
+                    let mut obj = self.constants[const_index].clone();
+                    if let Object::Function { ref mut env, .. } = obj {
+                        *env = Rc::clone(&self.env);
+                    }
+                    self.push(obj)?;
                 }
                 Opcode::OpAdd | Opcode::OpSub | Opcode::OpMul | Opcode::OpDiv | Opcode::OpModulo => {
                     let right = self.pop()?;
@@ -210,12 +218,28 @@ impl VM {
                 Opcode::OpSetGlobal => {
                     let global_index = ((self.instructions[ip + 1] as usize) << 8) | (self.instructions[ip + 2] as usize);
                     ip += 2;
-                    self.globals[global_index] = self.pop()?;
+                    let val = self.pop()?;
+                    self.globals[global_index] = val.clone();
+                    if global_index < self.symbol_names.len() {
+                        let name = self.symbol_names[global_index].clone();
+                        self.env.borrow_mut().set(name, val, true);
+                    }
                 }
                 Opcode::OpGetGlobal => {
                     let global_index = ((self.instructions[ip + 1] as usize) << 8) | (self.instructions[ip + 2] as usize);
                     ip += 2;
-                    self.push(self.globals[global_index].clone())?;
+                    let val = if global_index < self.symbol_names.len() {
+                        let name = &self.symbol_names[global_index];
+                        if let Some(v) = self.env.borrow().get(name) {
+                            self.globals[global_index] = v.clone();
+                            v
+                        } else {
+                            self.globals[global_index].clone()
+                        }
+                    } else {
+                        self.globals[global_index].clone()
+                    };
+                    self.push(val)?;
                 }
                 Opcode::OpJump => {
                     let target = ((self.instructions[ip + 1] as usize) << 8) | (self.instructions[ip + 2] as usize);
@@ -360,6 +384,13 @@ impl VM {
                     match callee {
                         Object::Builtin(name) => {
                             let result = crate::evaluator::apply_builtin(&name, args);
+                            if let Object::Error(err) = result {
+                                return Err(err);
+                            }
+                            self.push(result)?;
+                        }
+                        Object::Function { .. } => {
+                            let result = crate::evaluator::apply_function(callee, args);
                             if let Object::Error(err) = result {
                                 return Err(err);
                             }

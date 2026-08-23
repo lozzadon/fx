@@ -500,7 +500,7 @@ fn is_truthy(obj: &Object) -> bool {
     }
 }
 
-fn apply_function(func: Object, args: Vec<Object>) -> Object {
+pub fn apply_function(func: Object, args: Vec<Object>) -> Object {
     match func {
         Object::Function { parameters, return_type, body, env } => {
             let extended_env = Rc::new(RefCell::new(Environment::new_enclosed(env)));
@@ -559,7 +559,7 @@ fn apply_function(func: Object, args: Vec<Object>) -> Object {
 }
 
 pub fn apply_builtin(name: &str, args: Vec<Object>) -> Object {
-    if name.starts_with("std:") {
+    if name.starts_with("std:") || name.starts_with("topia:") {
         return match crate::stdlib::apply_std_builtin(name, args) {
             Some(res) => res,
             None => Object::Error(format!("unknown standard library function: {}", name)),
@@ -682,12 +682,16 @@ pub fn apply_builtin(name: &str, args: Vec<Object>) -> Object {
                 return Object::Error(format!("wrong number of arguments for import. got={}, want=1", args.len()));
             }
             if let Object::String(filename) = &args[0] {
-                if filename.starts_with("std:") || filename.starts_with("std/") {
+                if filename.starts_with("std:") || filename.starts_with("std/") || filename == "topia" {
                     if let Some(module) = crate::stdlib::load_std_module(filename) {
                         return module;
                     } else {
                         return Object::Error(format!("unknown standard library module: {}", filename));
                     }
+                }
+
+                if let Some(module) = crate::stdlib::load_std_module(filename) {
+                    return module;
                 }
 
                 match fs::read_to_string(filename) {
