@@ -249,9 +249,10 @@ fn eval_expression(expression: Expression, env: Rc<RefCell<Environment>>) -> Obj
 
             Object::Null // if no match is found, return null
         }
-        Expression::FunctionLiteral { parameters, body, .. } => {
+        Expression::FunctionLiteral { parameters, return_type, body, .. } => {
             Object::Function {
                 parameters,
+                return_type,
                 body: *body,
                 env, // Takes ownership of the clone
             }
@@ -310,19 +311,37 @@ fn is_truthy(obj: &Object) -> bool {
 
 fn apply_function(func: Object, args: Vec<Object>) -> Object {
     match func {
-        Object::Function { parameters, body, env } => {
+        Object::Function { parameters, return_type, body, env } => {
             let extended_env = Rc::new(RefCell::new(Environment::new_enclosed(env)));
-            for (i, param) in parameters.iter().enumerate() {
+            for (i, (param_name, param_type)) in parameters.iter().enumerate() {
                 if i < args.len() {
-                    extended_env.borrow_mut().set(param.clone(), args[i].clone(), true);
+                    let arg = &args[i];
+                    if let Some(expected_type) = param_type {
+                        let actual_type = arg.type_name();
+                        if actual_type != *expected_type && expected_type != "Any" {
+                            return Object::Error(format!("type mismatch for parameter '{}': expected {}, got {}", param_name, expected_type, actual_type));
+                        }
+                    }
+                    extended_env.borrow_mut().set(param_name.clone(), arg.clone(), true);
                 }
             }
+            
             let evaluated = eval_statement(body, extended_env);
-            if let Object::ReturnValue(val) = evaluated {
+            let final_val = if let Object::ReturnValue(val) = evaluated {
                 *val
             } else {
                 evaluated
+            };
+
+            // Check return type
+            if let Some(expected_ret) = return_type {
+                let actual_ret = final_val.type_name();
+                if actual_ret != expected_ret && expected_ret != "Any" {
+                    return Object::Error(format!("return type mismatch: expected {}, got {}", expected_ret, actual_ret));
+                }
             }
+
+            final_val
         }
         Object::Builtin(name) => apply_builtin(&name, args),
         _ => Object::Error(format!("not a function: {}", func)),

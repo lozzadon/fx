@@ -45,7 +45,8 @@ pub enum Expression {
     },
     FunctionLiteral {
         name: Option<String>,
-        parameters: Vec<String>,
+        parameters: Vec<(String, Option<String>)>, // (name, type_annotation)
+        return_type: Option<String>,
         body: Box<Statement>,
     },
     Call {

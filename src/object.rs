@@ -20,13 +20,31 @@ pub enum Object {
     Hash(HashMap<HashKey, Object>),
     ReturnValue(Box<Object>),
     Function {
-        parameters: Vec<String>,
+        parameters: Vec<(String, Option<String>)>,
+        return_type: Option<String>,
         body: Statement,
         env: Rc<RefCell<Environment>>,
     },
     Builtin(String),
     Null,
     Error(String),
+}
+
+impl Object {
+    pub fn type_name(&self) -> String {
+        match self {
+            Object::Integer(_) => "Int".to_string(),
+            Object::Float(_) => "Float".to_string(),
+            Object::Boolean(_) => "Bool".to_string(),
+            Object::String(_) => "String".to_string(),
+            Object::Array(_) => "Array".to_string(),
+            Object::Hash(_) => "Dict".to_string(),
+            Object::Function { .. } => "Func".to_string(),
+            Object::Builtin(_) => "Func".to_string(),
+            Object::Null => "Void".to_string(),
+            _ => "Unknown".to_string(),
+        }
+    }
 }
 
 impl Object {
@@ -64,9 +82,20 @@ impl std::fmt::Display for Object {
                 write!(f, "{{{}}}", formatted_pairs.join(", "))
             }
             Object::ReturnValue(val) => write!(f, "{}", val),
-            Object::Function { parameters, .. } => {
-                let params = parameters.join(", ");
-                write!(f, "func({}) {{ ... }}", params)
+            Object::Function { parameters, return_type, .. } => {
+                let params: Vec<String> = parameters.iter().map(|(name, typ)| {
+                    if let Some(t) = typ {
+                        format!("{}: {}", name, t)
+                    } else {
+                        name.clone()
+                    }
+                }).collect();
+                let ret = if let Some(rt) = return_type {
+                    format!(" -> {}", rt)
+                } else {
+                    "".to_string()
+                };
+                write!(f, "func({}){} {{ ... }}", params.join(", "), ret)
             }
             Object::Builtin(name) => write!(f, "[built-in function {}]", name),
             Object::Null => write!(f, "null"),

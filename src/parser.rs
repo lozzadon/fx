@@ -111,9 +111,13 @@ impl Parser {
         
         let parameters = self.parse_function_parameters()?;
         
+        let mut return_type = None;
         if self.peek_token == Token::Arrow {
-            self.next_token(); 
-            self.next_token(); 
+            self.next_token();
+            self.next_token();
+            if let Token::Ident(type_name) = &self.cur_token {
+                return_type = Some(type_name.clone());
+            }
         }
         
         if self.peek_token != Token::LBrace {
@@ -127,6 +131,7 @@ impl Parser {
         let function_literal = Expression::FunctionLiteral {
             name: Some(name.clone()),
             parameters,
+            return_type,
             body: Box::new(body),
         };
 
@@ -137,7 +142,7 @@ impl Parser {
         })
     }
 
-    fn parse_function_parameters(&mut self) -> Option<Vec<String>> {
+    fn parse_function_parameters(&mut self) -> Option<Vec<(String, Option<String>)>> {
         let mut parameters = Vec::new();
         
         if self.peek_token == Token::RParen {
@@ -146,28 +151,38 @@ impl Parser {
         }
         self.next_token(); 
         
-        if let Token::Ident(name) = &self.cur_token {
-            parameters.push(name.clone());
-        }
-        
-        if self.peek_token == Token::Colon {
-            self.next_token(); 
-            self.next_token(); 
+        if let Token::Ident(name_ref) = &self.cur_token {
+            let name = name_ref.clone();
+            let mut param_type = None;
+            if self.peek_token == Token::Colon {
+                self.next_token(); // consume ':'
+                self.next_token(); // consume type ident
+                if let Token::Ident(type_name) = &self.cur_token {
+                    param_type = Some(type_name.clone());
+                }
+            }
+            parameters.push((name, param_type));
         }
 
         while self.peek_token == Token::Comma {
-            self.next_token(); 
-            self.next_token(); 
-            if let Token::Ident(name) = &self.cur_token {
-                parameters.push(name.clone());
-            }
-            if self.peek_token == Token::Colon {
-                self.next_token(); 
-                self.next_token(); 
+            self.next_token(); // consume ','
+            self.next_token(); // move to next ident
+            if let Token::Ident(name_ref) = &self.cur_token {
+                let name = name_ref.clone();
+                let mut param_type = None;
+                if self.peek_token == Token::Colon {
+                    self.next_token(); // consume ':'
+                    self.next_token(); // move to type ident
+                    if let Token::Ident(type_name) = &self.cur_token {
+                        param_type = Some(type_name.clone());
+                    }
+                }
+                parameters.push((name, param_type));
             }
         }
         
         if self.peek_token != Token::RParen {
+            self.errors.push(format!("Expected ) for parameters, got {:?}", self.peek_token));
             return None;
         }
         self.next_token(); 
@@ -412,9 +427,13 @@ impl Parser {
         
         let parameters = self.parse_function_parameters()?;
         
+        let mut return_type = None;
         if self.peek_token == Token::Arrow {
-            self.next_token();
-            self.next_token();
+            self.next_token(); // consume ')'
+            self.next_token(); // move to type ident
+            if let Token::Ident(type_name) = &self.cur_token {
+                return_type = Some(type_name.clone());
+            }
         }
         
         if self.peek_token != Token::LBrace {
@@ -428,6 +447,7 @@ impl Parser {
         Some(Expression::FunctionLiteral {
             name: None,
             parameters,
+            return_type,
             body: Box::new(body),
         })
     }
