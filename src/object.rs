@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::cell::RefCell;
 use crate::ast::Statement;
@@ -10,14 +10,22 @@ pub enum HashKey {
     String(String),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Object {
     Integer(i64),
     Float(f64),
     Boolean(bool),
     String(String),
-    Array(Vec<Object>),
-    Hash(HashMap<HashKey, Object>),
+    Array(Rc<RefCell<Vec<Object>>>),
+    Hash(Rc<RefCell<HashMap<HashKey, Object>>>),
+    StructDef {
+        name: String,
+        fields: Vec<(String, Option<String>)>,
+    },
+    StructInstance {
+        struct_name: String,
+        fields: Rc<RefCell<HashMap<String, Object>>>,
+    },
     Range {
         start: i64,
         end: i64,
@@ -41,6 +49,97 @@ pub enum Object {
     Continue,
 }
 
+thread_local! {
+    static VISITED_DISPLAY_POINTERS: RefCell<HashSet<*const ()>> = RefCell::new(HashSet::new());
+    static VISITED_EQ_POINTERS: RefCell<HashSet<(*const (), *const ())>> = RefCell::new(HashSet::new());
+}
+
+struct EqPointerGuard((*const (), *const ()));
+impl Drop for EqPointerGuard {
+    fn drop(&mut self) {
+        VISITED_EQ_POINTERS.with(|v| v.borrow_mut().remove(&self.0));
+    }
+}
+
+struct DisplayPointerGuard(*const ());
+impl Drop for DisplayPointerGuard {
+    fn drop(&mut self) {
+        VISITED_DISPLAY_POINTERS.with(|v| v.borrow_mut().remove(&self.0));
+    }
+}
+
+impl PartialEq for Object {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Object::Integer(a), Object::Integer(b)) => a == b,
+            (Object::Float(a), Object::Float(b)) => a == b,
+            (Object::Boolean(a), Object::Boolean(b)) => a == b,
+            (Object::String(a), Object::String(b)) => a == b,
+            (Object::Null, Object::Null) => true,
+            (Object::Break, Object::Break) => true,
+            (Object::Continue, Object::Continue) => true,
+            (Object::Error(a), Object::Error(b)) => a == b,
+            (Object::Builtin(a), Object::Builtin(b)) => a == b,
+            (Object::ReturnValue(a), Object::ReturnValue(b)) => a == b,
+            (Object::Range { start: s1, end: e1, inclusive: i1 }, Object::Range { start: s2, end: e2, inclusive: i2 }) => {
+                s1 == s2 && e1 == e2 && i1 == i2
+            }
+            (Object::Array(a), Object::Array(b)) => {
+                if Rc::ptr_eq(a, b) {
+                    return true;
+                }
+                let ptr_a = a.as_ptr() as *const ();
+                let ptr_b = b.as_ptr() as *const ();
+                let pair = (ptr_a, ptr_b);
+                let already_visited = VISITED_EQ_POINTERS.with(|v| !v.borrow_mut().insert(pair));
+                if already_visited {
+                    return true;
+                }
+                let _guard = EqPointerGuard(pair);
+                *a.borrow() == *b.borrow()
+            }
+            (Object::Hash(a), Object::Hash(b)) => {
+                if Rc::ptr_eq(a, b) {
+                    return true;
+                }
+                let ptr_a = a.as_ptr() as *const ();
+                let ptr_b = b.as_ptr() as *const ();
+                let pair = (ptr_a, ptr_b);
+                let already_visited = VISITED_EQ_POINTERS.with(|v| !v.borrow_mut().insert(pair));
+                if already_visited {
+                    return true;
+                }
+                let _guard = EqPointerGuard(pair);
+                *a.borrow() == *b.borrow()
+            }
+            (Object::StructDef { name: n1, fields: f1 }, Object::StructDef { name: n2, fields: f2 }) => {
+                n1 == n2 && f1 == f2
+            }
+            (Object::StructInstance { struct_name: s1, fields: f1 }, Object::StructInstance { struct_name: s2, fields: f2 }) => {
+                if s1 != s2 {
+                    return false;
+                }
+                if Rc::ptr_eq(f1, f2) {
+                    return true;
+                }
+                let ptr_a = f1.as_ptr() as *const ();
+                let ptr_b = f2.as_ptr() as *const ();
+                let pair = (ptr_a, ptr_b);
+                let already_visited = VISITED_EQ_POINTERS.with(|v| !v.borrow_mut().insert(pair));
+                if already_visited {
+                    return true;
+                }
+                let _guard = EqPointerGuard(pair);
+                *f1.borrow() == *f2.borrow()
+            }
+            (Object::Function { parameters: p1, return_type: r1, body: b1, .. }, Object::Function { parameters: p2, return_type: r2, body: b2, .. }) => {
+                p1 == p2 && r1 == r2 && b1 == b2
+            }
+            _ => false,
+        }
+    }
+}
+
 impl Object {
     pub fn type_name(&self) -> String {
         match self {
@@ -51,15 +150,15 @@ impl Object {
             Object::Array(_) => "Array".to_string(),
             Object::Hash(_) => "Dict".to_string(),
             Object::Range { .. } => "Range".to_string(),
+            Object::StructDef { .. } => "StructDef".to_string(),
+            Object::StructInstance { struct_name, .. } => struct_name.clone(),
             Object::Function { .. } => "Func".to_string(),
             Object::Builtin(_) => "Func".to_string(),
             Object::Null => "Void".to_string(),
             _ => "Unknown".to_string(),
         }
     }
-}
 
-impl Object {
     pub fn get_hash_key(&self) -> Result<HashKey, String> {
         match self {
             Object::Integer(val) => Ok(HashKey::Integer(*val)),
@@ -85,12 +184,32 @@ impl std::fmt::Display for Object {
                 }
             }
             Object::Iterator { target, current } => write!(f, "<iterator @ {} for {}>", current, target),
-            Object::Array(elements) => {
-                let formatted_elements: Vec<String> = elements.iter().map(|e| e.to_string()).collect();
-                write!(f, "[{}]", formatted_elements.join(", "))
+            Object::Array(rc) => {
+                let ptr = rc.as_ptr() as *const ();
+                let already_visited = VISITED_DISPLAY_POINTERS.with(|v| !v.borrow_mut().insert(ptr));
+                if already_visited {
+                    return write!(f, "[...cyclic...]");
+                }
+                let _guard = DisplayPointerGuard(ptr);
+                write!(f, "[")?;
+                let elements = rc.borrow();
+                for (i, item) in elements.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", item)?;
+                }
+                write!(f, "]")
             }
-            Object::Hash(pairs) => {
-                let mut formatted_pairs: Vec<String> = pairs.iter().map(|(k, v)| {
+            Object::Hash(rc) => {
+                let ptr = rc.as_ptr() as *const ();
+                let already_visited = VISITED_DISPLAY_POINTERS.with(|v| !v.borrow_mut().insert(ptr));
+                if already_visited {
+                    return write!(f, "{{...cyclic...}}");
+                }
+                let _guard = DisplayPointerGuard(ptr);
+                let map = rc.borrow();
+                let mut formatted_pairs: Vec<String> = map.iter().map(|(k, v)| {
                     let key_str = match k {
                         HashKey::Integer(val) => val.to_string(),
                         HashKey::Boolean(val) => val.to_string(),
@@ -98,8 +217,32 @@ impl std::fmt::Display for Object {
                     };
                     format!("{}: {}", key_str, v)
                 }).collect();
-                formatted_pairs.sort(); // Sort for consistent output in tests
+                formatted_pairs.sort();
                 write!(f, "{{{}}}", formatted_pairs.join(", "))
+            }
+            Object::StructDef { name, fields } => {
+                let field_strs: Vec<String> = fields.iter().map(|(name, typ)| {
+                    if let Some(t) = typ {
+                        format!("{}: {}", name, t)
+                    } else {
+                        name.clone()
+                    }
+                }).collect();
+                write!(f, "struct {} {{{}}}", name, field_strs.join(", "))
+            }
+            Object::StructInstance { struct_name, fields } => {
+                let ptr = fields.as_ptr() as *const ();
+                let already_visited = VISITED_DISPLAY_POINTERS.with(|v| !v.borrow_mut().insert(ptr));
+                if already_visited {
+                    return write!(f, "{} {{...cyclic...}}", struct_name);
+                }
+                let _guard = DisplayPointerGuard(ptr);
+                let map = fields.borrow();
+                let mut formatted_fields: Vec<String> = map.iter().map(|(k, v)| {
+                    format!("{}: {}", k, v)
+                }).collect();
+                formatted_fields.sort();
+                write!(f, "{} {{{}}}", struct_name, formatted_fields.join(", "))
             }
             Object::ReturnValue(val) => write!(f, "{}", val),
             Object::Function { parameters, return_type, .. } => {

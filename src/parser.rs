@@ -14,6 +14,7 @@ enum Precedence {
     Prefix,      // -X or !X
     Call,        // myFunction(X)
     Index,       // array[index]
+    Dot,         // object.field
 }
 
 fn token_precedence(token: &Token) -> Precedence {
@@ -26,6 +27,7 @@ fn token_precedence(token: &Token) -> Precedence {
         Token::Asterisk | Token::Slash | Token::Percent => Precedence::Product,
         Token::LParen => Precedence::Call,
         Token::LBracket => Precedence::Index,
+        Token::Dot => Precedence::Dot,
         _ => Precedence::Lowest,
     }
 }
@@ -98,57 +100,69 @@ impl Parser {
 
     fn parse_statement(&mut self) -> Option<Statement> {
         match self.cur_token {
+            Token::Struct => self.parse_struct_statement(),
             Token::Let | Token::Var => self.parse_let_statement(),
             Token::Return => self.parse_return_statement(),
             Token::Break => self.parse_break_statement(),
             Token::Continue => self.parse_continue_statement(),
             Token::Func => self.parse_func_statement(),
-            Token::Ident(_) if matches!(self.peek_token, Token::Assign | Token::PlusAssign | Token::MinusAssign | Token::AsteriskAssign | Token::SlashAssign | Token::PercentAssign) => self.parse_assign_statement(),
             _ => self.parse_expression_statement(),
         }
     }
 
-    fn parse_assign_statement(&mut self) -> Option<Statement> {
+    fn parse_struct_statement(&mut self) -> Option<Statement> {
+        self.next_token(); // Move past 'struct'
         let name = match &self.cur_token {
             Token::Ident(name) => name.clone(),
-            _ => return None,
-        };
-        let op_token = self.peek_token.clone();
-        self.next_token(); // Move to '=' or '+=' etc.
-        self.next_token(); // Move to expression
-
-        let value_expr = self.parse_expression(Precedence::Lowest)?;
-        let final_value = match op_token {
-            Token::Assign => value_expr,
-            Token::PlusAssign => Expression::Infix {
-                left: Box::new(Expression::Identifier(name.clone())),
-                operator: "+".to_string(),
-                right: Box::new(value_expr),
-            },
-            Token::MinusAssign => Expression::Infix {
-                left: Box::new(Expression::Identifier(name.clone())),
-                operator: "-".to_string(),
-                right: Box::new(value_expr),
-            },
-            Token::AsteriskAssign => Expression::Infix {
-                left: Box::new(Expression::Identifier(name.clone())),
-                operator: "*".to_string(),
-                right: Box::new(value_expr),
-            },
-            Token::SlashAssign => Expression::Infix {
-                left: Box::new(Expression::Identifier(name.clone())),
-                operator: "/".to_string(),
-                right: Box::new(value_expr),
-            },
-            Token::PercentAssign => Expression::Infix {
-                left: Box::new(Expression::Identifier(name.clone())),
-                operator: "%".to_string(),
-                right: Box::new(value_expr),
-            },
-            _ => return None,
+            _ => {
+                self.push_error("Expected struct name identifier".to_string());
+                return None;
+            }
         };
 
-        Some(Statement::Assign { name, value: final_value })
+        if self.peek_token != Token::LBrace {
+            self.push_error(format!("Expected {{ after struct name, got {:?}", self.peek_token));
+            return None;
+        }
+        self.next_token(); // Move to '{'
+        self.next_token(); // Move to first field or '}'
+
+        let mut fields = Vec::new();
+        while self.cur_token != Token::RBrace && self.cur_token != Token::Eof {
+            let field_name = match &self.cur_token {
+                Token::Ident(n) => n.clone(),
+                _ => {
+                    self.push_error(format!("Expected field name in struct, got {:?}", self.cur_token));
+                    return None;
+                }
+            };
+
+            let mut field_type = None;
+            if self.peek_token == Token::Colon {
+                self.next_token(); // Move to ':'
+                self.next_token(); // Move to type ident
+                if let Token::Ident(t) = &self.cur_token {
+                    field_type = Some(t.clone());
+                } else {
+                    self.push_error(format!("Expected type annotation after ':', got {:?}", self.cur_token));
+                    return None;
+                }
+            }
+
+            fields.push((field_name, field_type));
+
+            if self.peek_token == Token::Comma {
+                self.next_token(); // consume ','
+            }
+            self.next_token(); // move to next field or '}'
+        }
+
+        if self.cur_token != Token::RBrace {
+            self.push_error(format!("Expected }} to close struct definition, got {:?}", self.cur_token));
+            return None;
+        }
+
+        Some(Statement::StructDef { name, fields })
     }
 
     fn parse_func_statement(&mut self) -> Option<Statement> {
@@ -279,8 +293,56 @@ impl Parser {
     }
 
     fn parse_expression_statement(&mut self) -> Option<Statement> {
-        let value = self.parse_expression(Precedence::Lowest)?;
-        Some(Statement::Expression(value))
+        let expr = self.parse_expression(Precedence::Lowest)?;
+        
+        if matches!(self.peek_token, Token::Assign | Token::PlusAssign | Token::MinusAssign | Token::AsteriskAssign | Token::SlashAssign | Token::PercentAssign) {
+            let op_token = self.peek_token.clone();
+            self.next_token(); // Move to '=' or '+=' etc.
+            self.next_token(); // Move to expression
+            
+            let value_expr = self.parse_expression(Precedence::Lowest)?;
+            let final_value = match op_token {
+                Token::Assign => value_expr,
+                Token::PlusAssign => Expression::Infix {
+                    left: Box::new(expr.clone()),
+                    operator: "+".to_string(),
+                    right: Box::new(value_expr),
+                },
+                Token::MinusAssign => Expression::Infix {
+                    left: Box::new(expr.clone()),
+                    operator: "-".to_string(),
+                    right: Box::new(value_expr),
+                },
+                Token::AsteriskAssign => Expression::Infix {
+                    left: Box::new(expr.clone()),
+                    operator: "*".to_string(),
+                    right: Box::new(value_expr),
+                },
+                Token::SlashAssign => Expression::Infix {
+                    left: Box::new(expr.clone()),
+                    operator: "/".to_string(),
+                    right: Box::new(value_expr),
+                },
+                Token::PercentAssign => Expression::Infix {
+                    left: Box::new(expr.clone()),
+                    operator: "%".to_string(),
+                    right: Box::new(value_expr),
+                },
+                _ => return None,
+            };
+
+            return match expr {
+                Expression::Identifier(name) => Some(Statement::Assign { name, value: final_value }),
+                Expression::Index { left, index } => Some(Statement::IndexAssign { left: *left, index: *index, value: final_value }),
+                Expression::FieldAccess { object, field } => Some(Statement::FieldAssign { object: *object, field, value: final_value }),
+                _ => {
+                    self.push_error(format!("invalid assignment target: {:?}", expr));
+                    None
+                }
+            };
+        }
+
+        Some(Statement::Expression(expr))
     }
 
     fn parse_block_statement(&mut self) -> Statement {
@@ -351,6 +413,20 @@ impl Parser {
                 Token::LBracket => {
                     self.next_token();
                     left_exp = self.parse_index_expression(left_exp)?;
+                }
+                Token::Dot => {
+                    self.next_token(); // Move to '.'
+                    if let Token::Ident(field_name) = &self.peek_token {
+                        let field = field_name.clone();
+                        self.next_token(); // Move to identifier
+                        left_exp = Expression::FieldAccess {
+                            object: Box::new(left_exp),
+                            field,
+                        };
+                    } else {
+                        self.push_error(format!("Expected identifier after '.', got {:?}", self.peek_token));
+                        return None;
+                    }
                 }
                 _ => return Some(left_exp),
             }
@@ -994,5 +1070,84 @@ mod tests_control_flow {
         assert_eq!(program.statements.len(), 2);
         assert_eq!(program.statements[0], Statement::Break);
         assert_eq!(program.statements[1], Statement::Continue);
+    }
+
+    #[test]
+    fn test_index_and_field_assignments() {
+        let input = "
+            arr[0] = 5
+            matrix[1][2] = 99
+            arr[i] += 1
+            p.x = 10
+            p.x += 5
+        ";
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let program = parser.parse_program();
+
+        assert_eq!(parser.errors.len(), 0, "Parser had errors: {:?}", parser.errors);
+        assert_eq!(program.statements.len(), 5);
+
+        assert_eq!(
+            program.statements[0],
+            Statement::IndexAssign {
+                left: Expression::Identifier("arr".to_string()),
+                index: Expression::IntegerLiteral(0),
+                value: Expression::IntegerLiteral(5),
+            }
+        );
+        assert_eq!(
+            program.statements[1],
+            Statement::IndexAssign {
+                left: Expression::Index {
+                    left: Box::new(Expression::Identifier("matrix".to_string())),
+                    index: Box::new(Expression::IntegerLiteral(1)),
+                },
+                index: Expression::IntegerLiteral(2),
+                value: Expression::IntegerLiteral(99),
+            }
+        );
+        assert_eq!(
+            program.statements[3],
+            Statement::FieldAssign {
+                object: Expression::Identifier("p".to_string()),
+                field: "x".to_string(),
+                value: Expression::IntegerLiteral(10),
+            }
+        );
+    }
+
+    #[test]
+    fn test_struct_definition() {
+        let input = "
+            struct Point {
+                x: Int,
+                y: Int
+            }
+            struct User {
+                id: Int,
+                name: String,
+                is_admin: Bool
+            }
+        ";
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let program = parser.parse_program();
+
+        assert_eq!(parser.errors.len(), 0, "Parser had errors: {:?}", parser.errors);
+        assert_eq!(program.statements.len(), 2);
+
+        assert_eq!(
+            program.statements[0],
+            Statement::StructDef {
+                name: "Point".to_string(),
+                fields: vec![
+                    ("x".to_string(), Some("Int".to_string())),
+                    ("y".to_string(), Some("Int".to_string())),
+                ],
+            }
+        );
     }
 }

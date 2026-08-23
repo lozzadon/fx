@@ -317,6 +317,7 @@ impl Lexer {
             "throw" => Token::Throw,
             "break" => Token::Break,
             "continue" => Token::Continue,
+            "struct" => Token::Struct,
             _ => Token::Ident(ident.to_string()),
         }
     }

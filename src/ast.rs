@@ -9,6 +9,20 @@ pub enum Statement {
         name: String,
         value: Expression,
     },
+    IndexAssign {
+        left: Expression,
+        index: Expression,
+        value: Expression,
+    },
+    FieldAssign {
+        object: Expression,
+        field: String,
+        value: Expression,
+    },
+    StructDef {
+        name: String,
+        fields: Vec<(String, Option<String>)>, // (field_name, field_type)
+    },
     Return(Expression),
     Expression(Expression),
     Block(Vec<Statement>), 
@@ -54,6 +68,10 @@ pub enum Expression {
     Call {
         function: Box<Expression>,
         arguments: Vec<Expression>,
+    },
+    FieldAccess {
+        object: Box<Expression>,
+        field: String,
     },
     StringLiteral(String),
     Array(Vec<Expression>),

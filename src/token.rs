@@ -25,6 +25,7 @@ pub enum Token {
     Throw,  // throw
     Break,  // break
     Continue, // continue
+    Struct, // struct
 
     // Operators
     Assign,          // =

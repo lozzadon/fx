@@ -8,6 +8,7 @@ mod code;
 mod compiler;
 mod vm;
 mod formatter;
+pub mod stdlib;
 #[cfg(test)]
 mod tests;
 

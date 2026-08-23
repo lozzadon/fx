@@ -98,6 +98,29 @@ impl Compiler {
                     return Err(format!("cannot assign to undefined variable {}", name));
                 }
             }
+            Statement::IndexAssign { left, index, value } => {
+                self.compile_expression(left)?;
+                self.compile_expression(index)?;
+                self.compile_expression(value)?;
+                self.emit(Opcode::OpSetIndex, &[]);
+            }
+            Statement::FieldAssign { object, field, value } => {
+                self.compile_expression(object)?;
+                let field_const = self.add_constant(Object::String(field.clone()));
+                self.emit(Opcode::OpConstant, &[field_const]);
+                self.compile_expression(value)?;
+                self.emit(Opcode::OpSetIndex, &[]);
+            }
+            Statement::StructDef { name, fields } => {
+                let struct_obj = Object::StructDef {
+                    name: name.clone(),
+                    fields: fields.clone(),
+                };
+                let const_idx = self.add_constant(struct_obj);
+                self.emit(Opcode::OpConstant, &[const_idx]);
+                let symbol_index = self.symbol_table.define(name.clone(), false);
+                self.emit(Opcode::OpSetGlobal, &[symbol_index]);
+            }
             Statement::Block(statements) => {
                 for stmt in statements {
                     self.compile_statement(stmt)?;
@@ -236,6 +259,19 @@ impl Compiler {
                     self.compile_expression(el)?;
                 }
                 self.emit(Opcode::OpArray, &[elements.len()]);
+            }
+            Expression::HashLiteral(pairs) => {
+                for (k, v) in pairs {
+                    self.compile_expression(k)?;
+                    self.compile_expression(v)?;
+                }
+                self.emit(Opcode::OpHash, &[pairs.len() * 2]);
+            }
+            Expression::FieldAccess { object, field } => {
+                self.compile_expression(object)?;
+                let field_const = self.add_constant(Object::String(field.clone()));
+                self.emit(Opcode::OpConstant, &[field_const]);
+                self.emit(Opcode::OpIndex, &[]);
             }
             Expression::Index { left, index } => {
                 self.compile_expression(left)?;

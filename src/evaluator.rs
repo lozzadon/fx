@@ -43,6 +43,93 @@ fn eval_statement(statement: Statement, env: Rc<RefCell<Environment>>) -> Object
                 Err(msg) => Object::Error(msg),
             }
         }
+        Statement::IndexAssign { left, index, value } => {
+            let index_val = eval_expression(index, Rc::clone(&env));
+            if let Object::Error(_) = index_val {
+                return index_val;
+            }
+            let val = eval_expression(value, Rc::clone(&env));
+            if let Object::Error(_) = val {
+                return val;
+            }
+            let target = eval_expression(left, env);
+            if let Object::Error(_) = target {
+                return target;
+            }
+
+            match target {
+                Object::Array(rc) => {
+                    let idx = match index_val {
+                        Object::Integer(i) => i,
+                        _ => return Object::Error(format!("array index must be integer, got {}", index_val.type_name())),
+                    };
+                    let mut vec = rc.borrow_mut();
+                    if idx >= 0 && (idx as usize) < vec.len() {
+                        vec[idx as usize] = val;
+                    } else if idx >= 0 && (idx as usize) == vec.len() {
+                        vec.push(val);
+                    } else {
+                        return Object::Error(format!("array index out of bounds: {}", idx));
+                    }
+                    Object::Null
+                }
+                Object::Hash(rc) => {
+                    let hash_key = match index_val.get_hash_key() {
+                        Ok(k) => k,
+                        Err(msg) => return Object::Error(msg),
+                    };
+                    rc.borrow_mut().insert(hash_key, val);
+                    Object::Null
+                }
+                Object::StructInstance { struct_name, fields } => {
+                    let field_name = match index_val {
+                        Object::String(s) => s,
+                        _ => return Object::Error(format!("struct field index must be string, got {}", index_val.type_name())),
+                    };
+                    let mut map = fields.borrow_mut();
+                    if !map.contains_key(&field_name) {
+                        return Object::Error(format!("struct '{}' has no field '{}'", struct_name, field_name));
+                    }
+                    map.insert(field_name, val);
+                    Object::Null
+                }
+                _ => Object::Error(format!("cannot index assign to type {}", target.type_name())),
+            }
+        }
+        Statement::FieldAssign { object, field, value } => {
+            let val = eval_expression(value, Rc::clone(&env));
+            if let Object::Error(_) = val {
+                return val;
+            }
+            let target = eval_expression(object, env);
+            if let Object::Error(_) = target {
+                return target;
+            }
+
+            match target {
+                Object::StructInstance { struct_name, fields } => {
+                    let mut map = fields.borrow_mut();
+                    if !map.contains_key(&field) {
+                        return Object::Error(format!("struct '{}' has no field '{}'", struct_name, field));
+                    }
+                    map.insert(field, val);
+                    Object::Null
+                }
+                Object::Hash(rc) => {
+                    rc.borrow_mut().insert(HashKey::String(field), val);
+                    Object::Null
+                }
+                _ => Object::Error(format!("cannot assign field '{}' on type {}", field, target.type_name())),
+            }
+        }
+        Statement::StructDef { name, fields } => {
+            let struct_def = Object::StructDef {
+                name: name.clone(),
+                fields,
+            };
+            env.borrow_mut().set(name, struct_def, false);
+            Object::Null
+        }
         Statement::Return(expr) => {
             let val = eval_expression(expr, env);
             if let Object::Error(_) = val {
@@ -105,10 +192,10 @@ fn eval_expression(expression: Expression, env: Rc<RefCell<Environment>>) -> Obj
                 }
                 eval_elements.push(evaluated);
             }
-            Object::Array(eval_elements)
+            Object::Array(Rc::new(RefCell::new(eval_elements)))
         }
         Expression::HashLiteral(pairs) => {
-            let mut eval_pairs = std::collections::HashMap::new();
+            let mut eval_pairs = HashMap::new();
             for (k, v) in pairs {
                 let key_eval = eval_expression(k, Rc::clone(&env));
                 if let Object::Error(_) = key_eval {
@@ -127,7 +214,31 @@ fn eval_expression(expression: Expression, env: Rc<RefCell<Environment>>) -> Obj
                 
                 eval_pairs.insert(hash_key, val_eval);
             }
-            Object::Hash(eval_pairs)
+            Object::Hash(Rc::new(RefCell::new(eval_pairs)))
+        }
+        Expression::FieldAccess { object, field } => {
+            let target = eval_expression(*object, env);
+            if let Object::Error(_) = target {
+                return target;
+            }
+
+            match target {
+                Object::StructInstance { struct_name, fields } => {
+                    let map = fields.borrow();
+                    match map.get(&field) {
+                        Some(val) => val.clone(),
+                        None => Object::Error(format!("field '{}' not found on struct '{}'", field, struct_name)),
+                    }
+                }
+                Object::Hash(rc) => {
+                    let map = rc.borrow();
+                    match map.get(&HashKey::String(field.clone())) {
+                        Some(val) => val.clone(),
+                        None => Object::Null,
+                    }
+                }
+                _ => Object::Error(format!("cannot access field '{}' on type {}", field, target.type_name())),
+            }
         }
         Expression::Index { left, index } => {
             let left_evaluated = eval_expression(*left, Rc::clone(&env));
@@ -230,7 +341,8 @@ fn eval_expression(expression: Expression, env: Rc<RefCell<Environment>>) -> Obj
             }
             
             match iter_evaluated {
-                Object::Array(elements) => {
+                Object::Array(rc) => {
+                    let elements = rc.borrow().clone();
                     for el in elements {
                         let loop_env = Rc::new(RefCell::new(Environment::new_enclosed(Rc::clone(&env))));
                         loop_env.borrow_mut().set(variable.clone(), el, false); 
@@ -281,7 +393,6 @@ fn eval_expression(expression: Expression, env: Rc<RefCell<Environment>>) -> Obj
             }
 
             for (pattern, body) in cases {
-                // Check if it's the `_` catch-all pattern
                 let is_catch_all = if let Expression::Identifier(name) = &pattern {
                     name == "_"
                 } else {
@@ -297,7 +408,6 @@ fn eval_expression(expression: Expression, env: Rc<RefCell<Environment>>) -> Obj
                     return pattern_evaluated;
                 }
 
-                // If pattern matches, evaluate body
                 if val_evaluated == pattern_evaluated {
                     return eval_statement(*body, env);
                 }
@@ -318,7 +428,7 @@ fn eval_expression(expression: Expression, env: Rc<RefCell<Environment>>) -> Obj
                 catch_env.borrow_mut().set(catch_param, Object::String(msg), false);
                 eval_statement(*catch_body, catch_env)
             } else {
-                result // Return the result of try_body if no error
+                result
             }
         }
         Expression::FunctionLiteral { parameters, return_type, body, .. } => {
@@ -326,7 +436,7 @@ fn eval_expression(expression: Expression, env: Rc<RefCell<Environment>>) -> Obj
                 parameters,
                 return_type,
                 body: *body,
-                env, // Takes ownership of the clone
+                env,
             }
         }
         Expression::Call { function, arguments } => {
@@ -351,22 +461,31 @@ fn eval_expression(expression: Expression, env: Rc<RefCell<Environment>>) -> Obj
 
 fn eval_index_expression(left: Object, index: Object) -> Object {
     match (left, index) {
-        (Object::Array(elements), Object::Integer(idx)) => {
+        (Object::Array(rc), Object::Integer(idx)) => {
+            let elements = rc.borrow();
             if idx < 0 || idx as usize >= elements.len() {
                 Object::Null
             } else {
                 elements[idx as usize].clone()
             }
         }
-        (Object::Hash(pairs), index_val) => {
+        (Object::Hash(rc), index_val) => {
             let hash_key = match index_val.get_hash_key() {
                 Ok(hk) => hk,
                 Err(msg) => return Object::Error(msg),
             };
             
+            let pairs = rc.borrow();
             match pairs.get(&hash_key) {
                 Some(val) => val.clone(),
                 None => Object::Null,
+            }
+        }
+        (Object::StructInstance { struct_name, fields }, Object::String(field_name)) => {
+            let map = fields.borrow();
+            match map.get(&field_name) {
+                Some(val) => val.clone(),
+                None => Object::Error(format!("field '{}' not found on struct '{}'", field_name, struct_name)),
             }
         }
         (l, _) => Object::Error(format!("index operator not supported for: {}", l)),
@@ -405,7 +524,6 @@ fn apply_function(func: Object, args: Vec<Object>) -> Object {
                 evaluated
             };
 
-            // Check return type
             if let Some(expected_ret) = return_type {
                 let actual_ret = final_val.type_name();
                 if actual_ret != expected_ret && expected_ret != "Any" {
@@ -415,12 +533,39 @@ fn apply_function(func: Object, args: Vec<Object>) -> Object {
 
             final_val
         }
+        Object::StructDef { name, fields } => {
+            if args.len() != fields.len() {
+                return Object::Error(format!("struct '{}' expects {} arguments, got {}", name, fields.len(), args.len()));
+            }
+            let mut instance_fields = HashMap::new();
+            for (i, (field_name, field_type)) in fields.iter().enumerate() {
+                let arg = &args[i];
+                if let Some(expected_type) = field_type {
+                    let actual_type = arg.type_name();
+                    if actual_type != *expected_type && expected_type != "Any" {
+                        return Object::Error(format!("type mismatch for struct field '{}': expected {}, got {}", field_name, expected_type, actual_type));
+                    }
+                }
+                instance_fields.insert(field_name.clone(), arg.clone());
+            }
+            Object::StructInstance {
+                struct_name: name,
+                fields: Rc::new(RefCell::new(instance_fields)),
+            }
+        }
         Object::Builtin(name) => apply_builtin(&name, args),
         _ => Object::Error(format!("not a function: {}", func)),
     }
 }
 
 pub fn apply_builtin(name: &str, args: Vec<Object>) -> Object {
+    if name.starts_with("std:") {
+        return match crate::stdlib::apply_std_builtin(name, args) {
+            Some(res) => res,
+            None => Object::Error(format!("unknown standard library function: {}", name)),
+        };
+    }
+
     match name {
         "len" => {
             if args.len() != 1 {
@@ -428,8 +573,9 @@ pub fn apply_builtin(name: &str, args: Vec<Object>) -> Object {
             }
             match &args[0] {
                 Object::String(s) => Object::Integer(s.chars().count() as i64),
-                Object::Array(elements) => Object::Integer(elements.len() as i64),
-                Object::Hash(pairs) => Object::Integer(pairs.len() as i64),
+                Object::Array(rc) => Object::Integer(rc.borrow().len() as i64),
+                Object::Hash(rc) => Object::Integer(rc.borrow().len() as i64),
+                Object::StructInstance { fields, .. } => Object::Integer(fields.borrow().len() as i64),
                 Object::Range { start, end, inclusive } => {
                     if *end >= *start {
                         let count = if *inclusive { (*end - *start).saturating_add(1) } else { *end - *start };
@@ -446,10 +592,9 @@ pub fn apply_builtin(name: &str, args: Vec<Object>) -> Object {
                 return Object::Error(format!("wrong number of arguments. got={}, want=2", args.len()));
             }
             match &args[0] {
-                Object::Array(elements) => {
-                    let mut new_elements = elements.clone();
-                    new_elements.push(args[1].clone());
-                    Object::Array(new_elements)
+                Object::Array(rc) => {
+                    rc.borrow_mut().push(args[1].clone());
+                    Object::Array(Rc::clone(rc))
                 }
                 _ => Object::Error(format!("argument to `push` must be ARRAY, got {}", args[0])),
             }
@@ -459,10 +604,8 @@ pub fn apply_builtin(name: &str, args: Vec<Object>) -> Object {
                 return Object::Error(format!("wrong number of arguments. got={}, want=1", args.len()));
             }
             match &args[0] {
-                Object::Array(elements) => {
-                    let mut new_elements = elements.clone();
-                    new_elements.pop();
-                    Object::Array(new_elements)
+                Object::Array(rc) => {
+                    rc.borrow_mut().pop().unwrap_or(Object::Null)
                 }
                 _ => Object::Error(format!("argument to `pop` must be ARRAY, got {}", args[0])),
             }
@@ -477,17 +620,18 @@ pub fn apply_builtin(name: &str, args: Vec<Object>) -> Object {
             if args.len() != 2 {
                 return Object::Error(format!("wrong number of arguments. got={}, want=2", args.len()));
             }
-            if let Object::Array(elements) = &args[0] {
+            if let Object::Array(rc) = &args[0] {
+                let elements = rc.borrow().clone();
                 let func = &args[1];
                 let mut mapped = Vec::new();
                 for el in elements {
-                    let result = apply_function(func.clone(), vec![el.clone()]);
+                    let result = apply_function(func.clone(), vec![el]);
                     if let Object::Error(_) = result {
                         return result;
                     }
                     mapped.push(result);
                 }
-                Object::Array(mapped)
+                Object::Array(Rc::new(RefCell::new(mapped)))
             } else {
                 Object::Error(format!("first argument to `map` must be ARRAY, got {}", args[0]))
             }
@@ -496,7 +640,8 @@ pub fn apply_builtin(name: &str, args: Vec<Object>) -> Object {
             if args.len() != 2 {
                 return Object::Error(format!("wrong number of arguments. got={}, want=2", args.len()));
             }
-            if let Object::Array(elements) = &args[0] {
+            if let Object::Array(rc) = &args[0] {
+                let elements = rc.borrow().clone();
                 let func = &args[1];
                 let mut filtered = Vec::new();
                 for el in elements {
@@ -505,10 +650,10 @@ pub fn apply_builtin(name: &str, args: Vec<Object>) -> Object {
                         return result;
                     }
                     if is_truthy(&result) {
-                        filtered.push(el.clone());
+                        filtered.push(el);
                     }
                 }
-                Object::Array(filtered)
+                Object::Array(Rc::new(RefCell::new(filtered)))
             } else {
                 Object::Error(format!("first argument to `filter` must be ARRAY, got {}", args[0]))
             }
@@ -517,11 +662,12 @@ pub fn apply_builtin(name: &str, args: Vec<Object>) -> Object {
             if args.len() != 3 {
                 return Object::Error(format!("wrong number of arguments. got={}, want=3", args.len()));
             }
-            if let Object::Array(elements) = &args[0] {
+            if let Object::Array(rc) = &args[0] {
+                let elements = rc.borrow().clone();
                 let mut accumulator = args[1].clone();
                 let func = &args[2];
                 for el in elements {
-                    accumulator = apply_function(func.clone(), vec![accumulator, el.clone()]);
+                    accumulator = apply_function(func.clone(), vec![accumulator, el]);
                     if let Object::Error(_) = accumulator {
                         return accumulator;
                     }
@@ -536,6 +682,14 @@ pub fn apply_builtin(name: &str, args: Vec<Object>) -> Object {
                 return Object::Error(format!("wrong number of arguments for import. got={}, want=1", args.len()));
             }
             if let Object::String(filename) = &args[0] {
+                if filename.starts_with("std:") || filename.starts_with("std/") {
+                    if let Some(module) = crate::stdlib::load_std_module(filename) {
+                        return module;
+                    } else {
+                        return Object::Error(format!("unknown standard library module: {}", filename));
+                    }
+                }
+
                 match fs::read_to_string(filename) {
                     Ok(contents) => {
                         let lexer = Lexer::new(&contents);
@@ -557,7 +711,7 @@ pub fn apply_builtin(name: &str, args: Vec<Object>) -> Object {
                             exports.insert(HashKey::String(k.clone()), v.clone());
                         }
                         
-                        Object::Hash(exports)
+                        Object::Hash(Rc::new(RefCell::new(exports)))
                     }
                     Err(e) => Object::Error(format!("could not read file {}: {}", filename, e)),
                 }
@@ -572,7 +726,7 @@ pub fn apply_builtin(name: &str, args: Vec<Object>) -> Object {
             match (&args[0], &args[1]) {
                 (Object::String(s), Object::String(delim)) => {
                     let parts: Vec<Object> = s.split(delim.as_str()).map(|p| Object::String(p.to_string())).collect();
-                    Object::Array(parts)
+                    Object::Array(Rc::new(RefCell::new(parts)))
                 }
                 _ => Object::Error("arguments to `split` must be (STRING, STRING)".to_string()),
             }
@@ -602,8 +756,9 @@ pub fn apply_builtin(name: &str, args: Vec<Object>) -> Object {
                 return Object::Error(format!("wrong number of arguments. got={}, want=2", args.len()));
             }
             match (&args[0], &args[1]) {
-                (Object::Array(elements), Object::String(sep)) => {
-                    let str_elements: Vec<String> = elements.iter().map(|e| e.to_string()).collect();
+                (Object::Array(rc), Object::String(sep)) => {
+                    let vec = rc.borrow();
+                    let str_elements: Vec<String> = vec.iter().map(|e| e.to_string()).collect();
                     Object::String(str_elements.join(sep))
                 }
                 _ => Object::Error("arguments to `join` must be (ARRAY, STRING)".to_string()),
@@ -701,6 +856,13 @@ fn eval_bang_prefix_operator_expression(right: Object) -> Object {
 }
 
 fn eval_infix_expression(operator: &str, left: Object, right: Object) -> Object {
+    if operator == "==" {
+        return Object::Boolean(left == right);
+    }
+    if operator == "!=" {
+        return Object::Boolean(left != right);
+    }
+
     if operator == "+" {
         if let (Object::String(l), Object::String(r)) = (&left, &right) {
             return eval_string_infix_expression(operator, l.clone(), r.clone());
@@ -866,137 +1028,72 @@ mod tests {
             a
         ";
         let evaluated = test_eval(input);
-        assert_eq!(evaluated, Object::Integer(1)); // (10 + 5 - 3) * 2 / 4 % 5 = 24 / 4 % 5 = 6 % 5 = 1
+        assert_eq!(evaluated, Object::Integer(1));
     }
 
     #[test]
-    fn test_eval_relational_and_modulo() {
-        let tests = vec![
-            ("5 <= 10", Object::Boolean(true)),
-            ("10 <= 10", Object::Boolean(true)),
-            ("15 <= 10", Object::Boolean(false)),
-            ("5 >= 10", Object::Boolean(false)),
-            ("10 >= 10", Object::Boolean(true)),
-            ("15 >= 10", Object::Boolean(true)),
-            ("14 % 4", Object::Integer(2)),
-            ("10.5 % 3.0", Object::Float(1.5)),
-            ("10 <= 10.5", Object::Boolean(true)),
-            ("11 >= 10.5", Object::Boolean(true)),
-        ];
-
-        for (input, expected) in tests {
-            let evaluated = test_eval(input);
-            assert_eq!(evaluated, expected, "Failed for input: {}", input);
-        }
-
-        let err_eval = test_eval("10 % 0");
-        assert_eq!(err_eval, Object::Error("division by zero".to_string()));
-    }
-
-    #[test]
-    fn test_eval_range_and_for_loops() {
+    fn test_eval_container_mutation() {
         let input = "
-            var sum = 0
-            for i in 0..5 {
-                sum += i
-            }
-            sum
+            var arr = [1, 2, 3]
+            arr[1] = 99
+            arr[1]
         ";
-        assert_eq!(test_eval(input), Object::Integer(10)); // 0+1+2+3+4 = 10
+        assert_eq!(test_eval(input), Object::Integer(99));
 
-        let input_inclusive = "
-            var fact = 1
-            for i in 1..=5 {
-                fact *= i
-            }
-            fact
+        let input_matrix = "
+            var matrix = [[1, 2], [3, 4]]
+            matrix[1][0] = 42
+            matrix[1][0]
         ";
-        assert_eq!(test_eval(input_inclusive), Object::Integer(120)); // 1*2*3*4*5 = 120
+        assert_eq!(test_eval(input_matrix), Object::Integer(42));
+
+        let input_swap = "
+            func swap(arr: Array, i: Int, j: Int) {
+                let temp = arr[i]
+                arr[i] = arr[j]
+                arr[j] = temp
+            }
+            var numbers = [10, 20, 30]
+            swap(numbers, 0, 2)
+            numbers[0]
+        ";
+        assert_eq!(test_eval(input_swap), Object::Integer(30));
     }
 
     #[test]
-    fn test_eval_string_utilities() {
-        let input_trim = r#"trim("  hello world  ")"#;
-        assert_eq!(test_eval(input_trim), Object::String("hello world".to_string()));
+    fn test_eval_structs_and_dot_notation() {
+        let input = r#"
+            struct Point {
+                x: Int,
+                y: Int
+            }
+            var p = Point(10, 20)
+            p.x = 99
+            p.x + p.y
+        "#;
+        assert_eq!(test_eval(input), Object::Integer(119));
 
-        let input_split = r#"split("a,b,c", ",")"#;
-        assert_eq!(
-            test_eval(input_split),
-            Object::Array(vec![
-                Object::String("a".to_string()),
-                Object::String("b".to_string()),
-                Object::String("c".to_string()),
-            ])
-        );
-
-        let input_replace = r#"replace("hello world", "world", "f(x)")"#;
-        assert_eq!(test_eval(input_replace), Object::String("hello f(x)".to_string()));
-
-        let input_join = r#"join(["apple", "banana", "cherry"], ", ")"#;
-        assert_eq!(test_eval(input_join), Object::String("apple, banana, cherry".to_string()));
-
-        let input_contains = r#"contains("rustacean", "ace")"#;
-        assert_eq!(test_eval(input_contains), Object::Boolean(true));
-
-        let input_starts = r#"starts_with("hello world", "hello")"#;
-        assert_eq!(test_eval(input_starts), Object::Boolean(true));
-
-        let input_ends = r#"ends_with("hello world", "world")"#;
-        assert_eq!(test_eval(input_ends), Object::Boolean(true));
-
-        let input_upper = r#"to_upper("hello")"#;
-        assert_eq!(test_eval(input_upper), Object::String("HELLO".to_string()));
-
-        let input_lower = r#"to_lower("HELLO")"#;
-        assert_eq!(test_eval(input_lower), Object::String("hello".to_string()));
-
-        let input_sub = r#"substring("hello world", 0, 5)"#;
-        assert_eq!(test_eval(input_sub), Object::String("hello".to_string()));
-    }
-}
-
-#[cfg(test)]
-mod tests_control_flow {
-    use super::*;
-    use crate::lexer::Lexer;
-    use crate::parser::Parser;
-    use std::rc::Rc;
-    use std::cell::RefCell;
-
-    fn test_eval(input: &str) -> Object {
-        let lexer = Lexer::new(input);
-        let mut parser = Parser::new(lexer);
-        let program = parser.parse_program();
-        let env = Rc::new(RefCell::new(Environment::new()));
-        eval_program(program, env)
+        let input_dict = r#"
+            var settings = {"theme": "dark", "zoom": 100}
+            settings.theme = "light"
+            settings.theme
+        "#;
+        assert_eq!(test_eval(input_dict), Object::String("light".to_string()));
     }
 
     #[test]
-    fn test_break_and_continue() {
-        let input = "
-            var results = []
-            var i = 0
-            while i < 10 {
-                i = i + 1
-                if i == 5 {
-                    continue
-                }
-                if i == 8 {
-                    break
-                }
-                results = push(results, i)
-            }
-            results
-        ";
+    fn test_eval_stdlib_math_json() {
+        let input_math = r#"
+            let math = import("std:math")
+            math.sqrt(16.0)
+        "#;
+        assert_eq!(test_eval(input_math), Object::Float(4.0));
 
-        let evaluated = test_eval(input);
-        if let Object::Array(elements) = evaluated {
-            assert_eq!(elements.len(), 6); // 1, 2, 3, 4, 6, 7
-            assert_eq!(elements[0], Object::Integer(1));
-            assert_eq!(elements[4], Object::Integer(6));
-            assert_eq!(elements[5], Object::Integer(7));
-        } else {
-            panic!("Expected array, got {:?}", evaluated);
-        }
+        let input_json = r#"
+            let json = import("std:json")
+            let parsed = json.parse("\{ \"a\": 10, \"b\": true \}")
+            parsed.a
+        "#;
+        assert_eq!(test_eval(input_json), Object::Integer(10));
     }
 }

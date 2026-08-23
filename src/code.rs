@@ -1,4 +1,3 @@
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Opcode {
     OpConstant,
@@ -26,10 +25,12 @@ pub enum Opcode {
     OpRange,
     OpArray,
     OpIndex,
+    OpSetIndex,
     OpGetBuiltin,
     OpCall,
     OpIterInit,
     OpIterNext,
+    OpHash,
 }
 
 impl From<u8> for Opcode {
@@ -60,10 +61,12 @@ impl From<u8> for Opcode {
             22 => Opcode::OpRange,
             23 => Opcode::OpArray,
             24 => Opcode::OpIndex,
-            25 => Opcode::OpGetBuiltin,
-            26 => Opcode::OpCall,
-            27 => Opcode::OpIterInit,
-            28 => Opcode::OpIterNext,
+            25 => Opcode::OpSetIndex,
+            26 => Opcode::OpGetBuiltin,
+            27 => Opcode::OpCall,
+            28 => Opcode::OpIterInit,
+            29 => Opcode::OpIterNext,
+            30 => Opcode::OpHash,
             _ => panic!("Unknown opcode: {}", v),
         }
     }
@@ -102,10 +105,12 @@ pub fn lookup(op: u8) -> Definition {
         Opcode::OpRange => Definition { name: "OpRange", operand_widths: vec![1] },
         Opcode::OpArray => Definition { name: "OpArray", operand_widths: vec![2] },
         Opcode::OpIndex => Definition { name: "OpIndex", operand_widths: vec![] },
+        Opcode::OpSetIndex => Definition { name: "OpSetIndex", operand_widths: vec![] },
         Opcode::OpGetBuiltin => Definition { name: "OpGetBuiltin", operand_widths: vec![2] },
         Opcode::OpCall => Definition { name: "OpCall", operand_widths: vec![1] },
         Opcode::OpIterInit => Definition { name: "OpIterInit", operand_widths: vec![] },
         Opcode::OpIterNext => Definition { name: "OpIterNext", operand_widths: vec![2] },
+        Opcode::OpHash => Definition { name: "OpHash", operand_widths: vec![2] },
     }
 }
 

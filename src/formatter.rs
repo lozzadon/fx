@@ -22,6 +22,24 @@ fn format_statement(stmt: &Statement, level: usize) -> String {
         Statement::Assign { name, value } => {
             format!("{}{} = {}", indent(level), name, format_expression(value, level))
         }
+        Statement::IndexAssign { left, index, value } => {
+            format!("{}{}[{}] = {}", indent(level), format_expression(left, level), format_expression(index, level), format_expression(value, level))
+        }
+        Statement::FieldAssign { object, field, value } => {
+            format!("{}{}.{} = {}", indent(level), format_expression(object, level), field, format_expression(value, level))
+        }
+        Statement::StructDef { name, fields } => {
+            let mut out = format!("{}struct {} {{\n", indent(level), name);
+            for (f_name, f_type) in fields {
+                if let Some(t) = f_type {
+                    out.push_str(&format!("{}{}: {},\n", indent(level + 1), f_name, t));
+                } else {
+                    out.push_str(&format!("{}{},\n", indent(level + 1), f_name));
+                }
+            }
+            out.push_str(&format!("{}}}", indent(level)));
+            out
+        }
         Statement::Return(expr) => {
             format!("{}return {}", indent(level), format_expression(expr, level))
         }
@@ -73,6 +91,9 @@ fn format_expression(expr: &Expression, level: usize) -> String {
                 els.push(format!("{}: {}", format_expression(k, level), format_expression(v, level)));
             }
             format!("{{{}}}", els.join(", "))
+        }
+        Expression::FieldAccess { object, field } => {
+            format!("{}.{}", format_expression(object, level), field)
         }
         Expression::Index { left, index } => {
             format!("{}[{}]", format_expression(left, level), format_expression(index, level))

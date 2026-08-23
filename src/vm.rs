@@ -1,6 +1,9 @@
 use crate::compiler::Bytecode;
 use crate::object::Object;
 use crate::code::{Opcode, Instructions};
+use std::rc::Rc;
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 const STACK_SIZE: usize = 2048;
 
@@ -248,28 +251,92 @@ impl VM {
                     for i in (0..num_elements).rev() {
                         elements[i] = self.pop()?;
                     }
-                    self.push(Object::Array(elements))?;
+                    self.push(Object::Array(Rc::new(RefCell::new(elements))))?;
+                }
+                Opcode::OpHash => {
+                    let num_elements = ((self.instructions[ip + 1] as usize) << 8) | (self.instructions[ip + 2] as usize);
+                    ip += 2;
+                    let num_pairs = num_elements / 2;
+                    let mut entries = Vec::with_capacity(num_pairs);
+                    for _ in 0..num_pairs {
+                        let value = self.pop()?;
+                        let key_obj = self.pop()?;
+                        let hash_key = key_obj.get_hash_key().map_err(|e| e)?;
+                        entries.push((hash_key, value));
+                    }
+                    let mut map = HashMap::new();
+                    for (k, v) in entries.into_iter().rev() {
+                        map.insert(k, v);
+                    }
+                    self.push(Object::Hash(Rc::new(RefCell::new(map))))?;
                 }
                 Opcode::OpIndex => {
                     let index = self.pop()?;
                     let container = self.pop()?;
                     match (container, index) {
-                        (Object::Array(elements), Object::Integer(idx)) => {
+                        (Object::Array(rc), Object::Integer(idx)) => {
+                            let elements = rc.borrow();
                             if idx < 0 || idx as usize >= elements.len() {
                                 self.push(Object::Null)?;
                             } else {
                                 self.push(elements[idx as usize].clone())?;
                             }
                         }
-                        (Object::Hash(pairs), index_val) => {
+                        (Object::Hash(rc), index_val) => {
                             let hash_key = index_val.get_hash_key().map_err(|e| e)?;
-                            if let Some(val) = pairs.get(&hash_key) {
+                            let map = rc.borrow();
+                            if let Some(val) = map.get(&hash_key) {
                                 self.push(val.clone())?;
                             } else {
                                 self.push(Object::Null)?;
                             }
                         }
+                        (Object::StructInstance { struct_name, fields }, Object::String(field_name)) => {
+                            let map = fields.borrow();
+                            if let Some(val) = map.get(&field_name) {
+                                self.push(val.clone())?;
+                            } else {
+                                return Err(format!("field '{}' not found on struct '{}'", field_name, struct_name));
+                            }
+                        }
                         (c, _) => return Err(format!("Index operator not supported for {:?}", c)),
+                    }
+                }
+                Opcode::OpSetIndex => {
+                    let value = self.pop()?;
+                    let index = self.pop()?;
+                    let container = self.pop()?;
+                    match container {
+                        Object::Array(rc) => {
+                            let idx = match index {
+                                Object::Integer(i) => i,
+                                _ => return Err("index must be integer".to_string()),
+                            };
+                            let mut vec = rc.borrow_mut();
+                            if idx >= 0 && (idx as usize) < vec.len() {
+                                vec[idx as usize] = value;
+                            } else if idx >= 0 && (idx as usize) == vec.len() {
+                                vec.push(value);
+                            } else {
+                                return Err(format!("index out of bounds: {}", idx));
+                            }
+                        }
+                        Object::Hash(rc) => {
+                            let key = index.get_hash_key().map_err(|e| e)?;
+                            rc.borrow_mut().insert(key, value);
+                        }
+                        Object::StructInstance { struct_name, fields } => {
+                            let field_name = match index {
+                                Object::String(s) => s,
+                                _ => return Err("struct field must be string".to_string()),
+                            };
+                            let mut map = fields.borrow_mut();
+                            if !map.contains_key(&field_name) {
+                                return Err(format!("field '{}' not found on struct '{}'", field_name, struct_name));
+                            }
+                            map.insert(field_name, value);
+                        }
+                        _ => return Err("target is not indexable or mutable".to_string()),
                     }
                 }
                 Opcode::OpGetBuiltin => {
@@ -298,7 +365,27 @@ impl VM {
                             }
                             self.push(result)?;
                         }
-                        _ => return Err(format!("Calling non-builtin object in VM is not supported: {:?}", callee)),
+                        Object::StructDef { name, fields } => {
+                            if args.len() != fields.len() {
+                                return Err(format!("struct '{}' expects {} arguments, got {}", name, fields.len(), args.len()));
+                            }
+                            let mut instance_fields = HashMap::new();
+                            for (i, (f_name, f_type)) in fields.iter().enumerate() {
+                                let arg = &args[i];
+                                if let Some(expected_type) = f_type {
+                                    let actual_type = arg.type_name();
+                                    if actual_type != *expected_type && expected_type != "Any" {
+                                        return Err(format!("type mismatch for struct field '{}': expected {}, got {}", f_name, expected_type, actual_type));
+                                    }
+                                }
+                                instance_fields.insert(f_name.clone(), arg.clone());
+                            }
+                            self.push(Object::StructInstance {
+                                struct_name: name,
+                                fields: Rc::new(RefCell::new(instance_fields)),
+                            })?;
+                        }
+                        _ => return Err(format!("Calling non-callable object in VM is not supported: {:?}", callee)),
                     }
                 }
                 Opcode::OpIterInit => {
@@ -341,9 +428,11 @@ impl VM {
                                         continue;
                                     }
                                 }
-                                Object::Array(elements) => {
+                                Object::Array(rc) => {
+                                    let elements = rc.borrow();
                                     if (*current as usize) < elements.len() {
                                         let next_elem = elements[*current as usize].clone();
+                                        drop(elements);
                                         *current += 1;
                                         self.stack[self.sp - 1] = iter_obj;
                                         self.push(next_elem)?;
