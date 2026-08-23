@@ -133,3 +133,64 @@ func add_to_base(x) {
 }
 add_to_base(50) // 150
 ```
+
+### Dictionaries & Array Utilities
+`f(x)` supports JavaScript-like dictionary mapping and functional array methods.
+````fx
+let user = {"name": "Alice", "score": 95}
+let arr = [1, 2, 3]
+let arr2 = push(arr, 4)
+
+let evens = filter(arr2, func(x) { x == 2 || x == 4 })
+````
+
+### String Interpolation
+Embed variables directly in your strings.
+````fx
+let name = "Alice"
+print("Hello {name}, your score is {user["score"]}!")
+````
+
+### Pattern Matching (`match`)
+Clean branching logic.
+````fx
+let code = 404
+let status = match code {
+    200 => "OK",
+    404 => "Not Found",
+    _ => "Unknown Error"
+}
+````
+
+### Runtime Type Checking
+Optionally enforce types in your function signatures to catch bugs at execution.
+````fx
+func safe_add(a: Int, b: Int) -> Int {
+    a + b
+}
+// safe_add(1, "str") will throw a fatal runtime type mismatch!
+````
+
+### Try / Catch / Throw
+Gracefully handle failures.
+````fx
+let result = try {
+    throw "Server Disconnected!"
+    "Success"
+} catch e {
+    "Failed with: {e}"
+}
+````
+
+### Modules & Imports
+Organize your code across files using the built-in `import` function.
+````fx
+// math.fx
+func add(a, b) { a + b }
+let pi = 3.14
+
+// main.fx
+let math = import("math.fx")
+print(math["add"](10, 5))
+print(math["pi"])
+````
