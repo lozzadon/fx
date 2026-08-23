@@ -8,7 +8,8 @@ pub struct VM {
     constants: Vec<Object>,
     instructions: Instructions,
     stack: Vec<Object>,
-    sp: usize, // Stack pointer. Always points to the next free slot.
+    sp: usize, // Stack pointer
+    pub last_popped: Option<Object>,
 }
 
 impl VM {
@@ -18,15 +19,12 @@ impl VM {
             instructions: bytecode.instructions,
             stack: vec![Object::Null; STACK_SIZE],
             sp: 0,
+            last_popped: None,
         }
     }
 
-    pub fn stack_top(&self) -> Option<&Object> {
-        if self.sp == 0 {
-            None
-        } else {
-            Some(&self.stack[self.sp - 1])
-        }
+    pub fn last_popped_elem(&self) -> Option<&Object> {
+        self.last_popped.as_ref()
     }
 
     pub fn run(&mut self) -> Result<(), String> {
@@ -60,7 +58,8 @@ impl VM {
                     }
                 }
                 Opcode::OpPop => {
-                    self.pop()?;
+                    let popped = self.pop()?;
+                    self.last_popped = Some(popped);
                 }
                 _ => return Err(format!("Opcode not implemented: {:?}", op)),
             }

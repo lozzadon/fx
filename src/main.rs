@@ -29,6 +29,12 @@ fn main() {
                 std::process::exit(1);
             }
             format_file(&args[2]);
+        } else if args[1] == "--vm" {
+            if args.len() < 3 {
+                eprintln!("Usage: fx --vm <file.fx>");
+                std::process::exit(1);
+            }
+            run_file_vm(&args[2]);
         } else {
             // Run a file
             let filename = &args[1];
@@ -37,6 +43,41 @@ fn main() {
     } else {
         // Start REPL
         start_repl();
+    }
+}
+
+fn run_file_vm(filename: &str) {
+    let contents = fs::read_to_string(filename).unwrap_or_else(|err| {
+        eprintln!("Error reading {}: {}", filename, err);
+        std::process::exit(1);
+    });
+
+    let lexer = Lexer::new(&contents);
+    let mut parser = Parser::new(lexer);
+    let program = parser.parse_program();
+
+    if !parser.errors.is_empty() {
+        eprintln!("Cannot compile {}; there are syntax errors:", filename);
+        for msg in parser.errors {
+            eprintln!("\t{}", msg);
+        }
+        std::process::exit(1);
+    }
+
+    let mut compiler = compiler::Compiler::new();
+    if let Err(err) = compiler.compile(&program) {
+        eprintln!("Compiler error: {}", err);
+        std::process::exit(1);
+    }
+
+    let mut machine = vm::VM::new(compiler.bytecode());
+    if let Err(err) = machine.run() {
+        eprintln!("VM error: {}", err);
+        std::process::exit(1);
+    }
+
+    if let Some(result) = machine.last_popped_elem() {
+        println!("{}", result);
     }
 }
 
