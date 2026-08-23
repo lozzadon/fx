@@ -30,10 +30,10 @@ let result = try {
 }
 var sum = 0
 for score in user["scores"] {
-    var sum = sum + score
+    sum = sum + score
 }
-let safe_multiply = func safe_multiply(a: Int, b: Int) -> Int {
-    a * b
+let safe_multiply = func(a: Int, b: Int) -> Int {
+    return a * b
 }
 let product = safe_multiply(math["add"](10, 5), 2)
 print("Status: " + status)

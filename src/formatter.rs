@@ -104,7 +104,7 @@ fn format_expression(expr: &Expression, level: usize) -> String {
         Expression::Throw(expr) => {
             format!("throw {}", format_expression(expr, level))
         }
-        Expression::FunctionLiteral { name, parameters, return_type, body } => {
+        Expression::FunctionLiteral { parameters, return_type, body, .. } => {
             let mut params = Vec::new();
             for (p_name, p_type) in parameters {
                 if let Some(t) = p_type {
@@ -120,13 +120,7 @@ fn format_expression(expr: &Expression, level: usize) -> String {
                 "".to_string()
             };
 
-            let name_str = name.clone().unwrap_or_else(|| "".to_string());
-            let func_decl = if name_str.is_empty() {
-                format!("func({}){}", params.join(", "), ret)
-            } else {
-                format!("func {}({}){}", name_str, params.join(", "), ret)
-            };
-
+            let func_decl = format!("func({}){}", params.join(", "), ret);
             format!("{} {{\n{}{}}}", func_decl, format_statement(body, level + 1), indent(level))
         }
     }
