@@ -18,6 +18,15 @@ pub enum Object {
     String(String),
     Array(Vec<Object>),
     Hash(HashMap<HashKey, Object>),
+    Range {
+        start: i64,
+        end: i64,
+        inclusive: bool,
+    },
+    Iterator {
+        target: Box<Object>,
+        current: i64,
+    },
     ReturnValue(Box<Object>),
     Function {
         parameters: Vec<(String, Option<String>)>,
@@ -28,6 +37,8 @@ pub enum Object {
     Builtin(String),
     Null,
     Error(String),
+    Break,
+    Continue,
 }
 
 impl Object {
@@ -39,6 +50,7 @@ impl Object {
             Object::String(_) => "String".to_string(),
             Object::Array(_) => "Array".to_string(),
             Object::Hash(_) => "Dict".to_string(),
+            Object::Range { .. } => "Range".to_string(),
             Object::Function { .. } => "Func".to_string(),
             Object::Builtin(_) => "Func".to_string(),
             Object::Null => "Void".to_string(),
@@ -65,6 +77,14 @@ impl std::fmt::Display for Object {
             Object::Float(val) => write!(f, "{}", val),
             Object::Boolean(val) => write!(f, "{}", val),
             Object::String(val) => write!(f, "{}", val),
+            Object::Range { start, end, inclusive } => {
+                if *inclusive {
+                    write!(f, "{}..={}", start, end)
+                } else {
+                    write!(f, "{}..{}", start, end)
+                }
+            }
+            Object::Iterator { target, current } => write!(f, "<iterator @ {} for {}>", current, target),
             Object::Array(elements) => {
                 let formatted_elements: Vec<String> = elements.iter().map(|e| e.to_string()).collect();
                 write!(f, "[{}]", formatted_elements.join(", "))
@@ -100,6 +120,8 @@ impl std::fmt::Display for Object {
             Object::Builtin(name) => write!(f, "[built-in function {}]", name),
             Object::Null => write!(f, "null"),
             Object::Error(msg) => write!(f, "ERROR: {}", msg),
+            Object::Break => write!(f, "BREAK"),
+            Object::Continue => write!(f, "CONTINUE"),
         }
     }
 }
@@ -121,6 +143,16 @@ impl Environment {
         store.insert("filter".to_string(), (Object::Builtin("filter".to_string()), false));
         store.insert("reduce".to_string(), (Object::Builtin("reduce".to_string()), false));
         store.insert("import".to_string(), (Object::Builtin("import".to_string()), false));
+        store.insert("split".to_string(), (Object::Builtin("split".to_string()), false));
+        store.insert("trim".to_string(), (Object::Builtin("trim".to_string()), false));
+        store.insert("replace".to_string(), (Object::Builtin("replace".to_string()), false));
+        store.insert("join".to_string(), (Object::Builtin("join".to_string()), false));
+        store.insert("contains".to_string(), (Object::Builtin("contains".to_string()), false));
+        store.insert("starts_with".to_string(), (Object::Builtin("starts_with".to_string()), false));
+        store.insert("ends_with".to_string(), (Object::Builtin("ends_with".to_string()), false));
+        store.insert("to_upper".to_string(), (Object::Builtin("to_upper".to_string()), false));
+        store.insert("to_lower".to_string(), (Object::Builtin("to_lower".to_string()), false));
+        store.insert("substring".to_string(), (Object::Builtin("substring".to_string()), false));
         
         Environment {
             store,
@@ -145,6 +177,7 @@ impl Environment {
         }
     }
     
+    #[allow(dead_code)]
     pub fn is_mutable(&self, name: &str) -> Option<bool> {
         match self.store.get(name) {
             Some((_, mutable)) => Some(*mutable),

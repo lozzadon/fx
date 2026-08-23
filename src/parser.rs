@@ -7,9 +7,10 @@ enum Precedence {
     Lowest,
     Logical,     // &&, ||
     Equals,      // ==, !=
-    LessGreater, // > or <
-    Sum,         // +
-    Product,     // *
+    LessGreater, // <, >, <=, >=
+    Range,       // .., ..=
+    Sum,         // +, -
+    Product,     // *, /, %
     Prefix,      // -X or !X
     Call,        // myFunction(X)
     Index,       // array[index]
@@ -19,9 +20,10 @@ fn token_precedence(token: &Token) -> Precedence {
     match token {
         Token::Or | Token::And => Precedence::Logical,
         Token::Equal | Token::NotEqual => Precedence::Equals,
-        Token::LessThan | Token::GreaterThan => Precedence::LessGreater,
+        Token::LessThan | Token::GreaterThan | Token::LessEqual | Token::GreaterEqual => Precedence::LessGreater,
+        Token::DotDot | Token::DotDotEqual => Precedence::Range,
         Token::Plus | Token::Minus => Precedence::Sum,
-        Token::Asterisk | Token::Slash => Precedence::Product,
+        Token::Asterisk | Token::Slash | Token::Percent => Precedence::Product,
         Token::LParen => Precedence::Call,
         Token::LBracket => Precedence::Index,
         _ => Precedence::Lowest,
@@ -98,8 +100,10 @@ impl Parser {
         match self.cur_token {
             Token::Let | Token::Var => self.parse_let_statement(),
             Token::Return => self.parse_return_statement(),
+            Token::Break => self.parse_break_statement(),
+            Token::Continue => self.parse_continue_statement(),
             Token::Func => self.parse_func_statement(),
-            Token::Ident(_) if self.peek_token == Token::Assign => self.parse_assign_statement(),
+            Token::Ident(_) if matches!(self.peek_token, Token::Assign | Token::PlusAssign | Token::MinusAssign | Token::AsteriskAssign | Token::SlashAssign | Token::PercentAssign) => self.parse_assign_statement(),
             _ => self.parse_expression_statement(),
         }
     }
@@ -109,12 +113,42 @@ impl Parser {
             Token::Ident(name) => name.clone(),
             _ => return None,
         };
-        self.next_token(); // Move to '='
+        let op_token = self.peek_token.clone();
+        self.next_token(); // Move to '=' or '+=' etc.
         self.next_token(); // Move to expression
 
-        let value = self.parse_expression(Precedence::Lowest)?;
+        let value_expr = self.parse_expression(Precedence::Lowest)?;
+        let final_value = match op_token {
+            Token::Assign => value_expr,
+            Token::PlusAssign => Expression::Infix {
+                left: Box::new(Expression::Identifier(name.clone())),
+                operator: "+".to_string(),
+                right: Box::new(value_expr),
+            },
+            Token::MinusAssign => Expression::Infix {
+                left: Box::new(Expression::Identifier(name.clone())),
+                operator: "-".to_string(),
+                right: Box::new(value_expr),
+            },
+            Token::AsteriskAssign => Expression::Infix {
+                left: Box::new(Expression::Identifier(name.clone())),
+                operator: "*".to_string(),
+                right: Box::new(value_expr),
+            },
+            Token::SlashAssign => Expression::Infix {
+                left: Box::new(Expression::Identifier(name.clone())),
+                operator: "/".to_string(),
+                right: Box::new(value_expr),
+            },
+            Token::PercentAssign => Expression::Infix {
+                left: Box::new(Expression::Identifier(name.clone())),
+                operator: "%".to_string(),
+                right: Box::new(value_expr),
+            },
+            _ => return None,
+        };
 
-        Some(Statement::Assign { name, value })
+        Some(Statement::Assign { name, value: final_value })
     }
 
     fn parse_func_statement(&mut self) -> Option<Statement> {
@@ -236,6 +270,14 @@ impl Parser {
         Some(Statement::Return(value))
     }
 
+    fn parse_break_statement(&mut self) -> Option<Statement> {
+        Some(Statement::Break)
+    }
+
+    fn parse_continue_statement(&mut self) -> Option<Statement> {
+        Some(Statement::Continue)
+    }
+
     fn parse_expression_statement(&mut self) -> Option<Statement> {
         let value = self.parse_expression(Precedence::Lowest)?;
         Some(Statement::Expression(value))
@@ -283,11 +325,24 @@ impl Parser {
 
         while self.peek_token != Token::Eof && precedence < self.peek_precedence() {
             match self.peek_token {
-                Token::Plus | Token::Minus | Token::Asterisk | Token::Slash |
+                Token::Plus | Token::Minus | Token::Asterisk | Token::Slash | Token::Percent |
                 Token::Equal | Token::NotEqual | Token::LessThan | Token::GreaterThan |
+                Token::LessEqual | Token::GreaterEqual |
                 Token::And | Token::Or => {
                     self.next_token(); 
                     left_exp = self.parse_infix_expression(left_exp)?;
+                }
+                Token::DotDot | Token::DotDotEqual => {
+                    let inclusive = self.peek_token == Token::DotDotEqual;
+                    self.next_token();
+                    let prec = self.cur_precedence();
+                    self.next_token();
+                    let right = self.parse_expression(prec)?;
+                    left_exp = Expression::Range {
+                        start: Box::new(left_exp),
+                        end: Box::new(right),
+                        inclusive,
+                    };
                 }
                 Token::LParen => {
                     self.next_token();
@@ -556,10 +611,13 @@ impl Parser {
             Token::Minus => "-",
             Token::Asterisk => "*",
             Token::Slash => "/",
+            Token::Percent => "%",
             Token::Equal => "==",
             Token::NotEqual => "!=",
             Token::LessThan => "<",
             Token::GreaterThan => ">",
+            Token::LessEqual => "<=",
+            Token::GreaterEqual => ">=",
             Token::And => "&&",
             Token::Or => "||",
             _ => return None,
@@ -707,16 +765,20 @@ impl Parser {
             _ => return None,
         };
 
-        if !val.contains('{') {
-            return Some(Expression::StringLiteral(val));
-        }
-
         let mut parts = Vec::new();
         let mut current_text = String::new();
         let mut chars = val.chars().peekable();
+        let mut has_interpolation = false;
 
         while let Some(c) = chars.next() {
-            if c == '{' {
+            if c == '\\' && chars.peek() == Some(&'{') {
+                chars.next();
+                current_text.push('{');
+            } else if c == '\\' && chars.peek() == Some(&'}') {
+                chars.next();
+                current_text.push('}');
+            } else if c == '{' {
+                has_interpolation = true;
                 if !current_text.is_empty() {
                     parts.push(Expression::StringLiteral(current_text.clone()));
                     current_text.clear();
@@ -724,14 +786,29 @@ impl Parser {
                 
                 let mut expr_str = String::new();
                 let mut brace_count = 1;
+                let mut in_string = false;
                 
                 while let Some(inner_c) = chars.next() {
-                    if inner_c == '{' {
-                        brace_count += 1;
-                    } else if inner_c == '}' {
-                        brace_count -= 1;
-                        if brace_count == 0 {
-                            break;
+                    if in_string {
+                        if inner_c == '\\' {
+                            expr_str.push(inner_c);
+                            if let Some(next_c) = chars.next() {
+                                expr_str.push(next_c);
+                            }
+                            continue;
+                        } else if inner_c == '"' {
+                            in_string = false;
+                        }
+                    } else {
+                        if inner_c == '"' {
+                            in_string = true;
+                        } else if inner_c == '{' {
+                            brace_count += 1;
+                        } else if inner_c == '}' {
+                            brace_count -= 1;
+                            if brace_count == 0 {
+                                break;
+                            }
                         }
                     }
                     expr_str.push(inner_c);
@@ -748,6 +825,10 @@ impl Parser {
             }
         }
         
+        if !has_interpolation {
+            return Some(Expression::StringLiteral(current_text));
+        }
+
         if !current_text.is_empty() {
             parts.push(Expression::StringLiteral(current_text));
         }
@@ -756,8 +837,15 @@ impl Parser {
             return Some(Expression::StringLiteral("".to_string()));
         }
 
-        let mut combined = parts[0].clone();
-        for i in 1..parts.len() {
+        let mut combined = match &parts[0] {
+            Expression::StringLiteral(_) => parts[0].clone(),
+            _ => Expression::StringLiteral("".to_string()),
+        };
+        let start_idx = match &parts[0] {
+            Expression::StringLiteral(_) => 1,
+            _ => 0,
+        };
+        for i in start_idx..parts.len() {
             combined = Expression::Infix {
                 left: Box::new(combined),
                 operator: "+".to_string(),
@@ -766,5 +854,145 @@ impl Parser {
         }
         
         Some(combined)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::Lexer;
+
+    #[test]
+    fn test_let_statements() {
+        let input = "
+            let x = 5
+            let y = 10
+            let foobar = 838383
+        ";
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let program = parser.parse_program();
+
+        assert_eq!(parser.errors.len(), 0, "Parser had errors: {:?}", parser.errors);
+        assert_eq!(program.statements.len(), 3);
+    }
+
+    #[test]
+    fn test_compound_assignments() {
+        let input = "
+            x += 5
+            y -= 3
+            z *= 2
+            a /= 4
+            b %= 7
+        ";
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let program = parser.parse_program();
+
+        assert_eq!(parser.errors.len(), 0, "Parser had errors: {:?}", parser.errors);
+        assert_eq!(program.statements.len(), 5);
+
+        assert_eq!(
+            program.statements[0],
+            Statement::Assign {
+                name: "x".to_string(),
+                value: Expression::Infix {
+                    left: Box::new(Expression::Identifier("x".to_string())),
+                    operator: "+".to_string(),
+                    right: Box::new(Expression::IntegerLiteral(5)),
+                }
+            }
+        );
+        assert_eq!(
+            program.statements[4],
+            Statement::Assign {
+                name: "b".to_string(),
+                value: Expression::Infix {
+                    left: Box::new(Expression::Identifier("b".to_string())),
+                    operator: "%".to_string(),
+                    right: Box::new(Expression::IntegerLiteral(7)),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn test_range_expressions() {
+        let input = "
+            0..10
+            1..=5
+            0 + 1 .. 9 + 1
+        ";
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let program = parser.parse_program();
+
+        assert_eq!(parser.errors.len(), 0, "Parser had errors: {:?}", parser.errors);
+        assert_eq!(program.statements.len(), 3);
+
+        assert_eq!(
+            program.statements[0],
+            Statement::Expression(Expression::Range {
+                start: Box::new(Expression::IntegerLiteral(0)),
+                end: Box::new(Expression::IntegerLiteral(10)),
+                inclusive: false,
+            })
+        );
+        assert_eq!(
+            program.statements[1],
+            Statement::Expression(Expression::Range {
+                start: Box::new(Expression::IntegerLiteral(1)),
+                end: Box::new(Expression::IntegerLiteral(5)),
+                inclusive: true,
+            })
+        );
+    }
+
+    #[test]
+    fn test_escaped_braces_in_string() {
+        let input = r#"
+            let s = "Literal \{name\} here"
+        "#;
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let program = parser.parse_program();
+
+        assert_eq!(parser.errors.len(), 0, "Parser had errors: {:?}", parser.errors);
+        assert_eq!(
+            program.statements[0],
+            Statement::Let {
+                name: "s".to_string(),
+                value: Expression::StringLiteral("Literal {name} here".to_string()),
+                is_mutable: false,
+            }
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests_control_flow {
+    use super::*;
+    use crate::lexer::Lexer;
+
+    #[test]
+    fn test_break_continue_statements() {
+        let input = "
+            break
+            continue
+        ";
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let program = parser.parse_program();
+
+        assert_eq!(parser.errors.len(), 0);
+        assert_eq!(program.statements.len(), 2);
+        assert_eq!(program.statements[0], Statement::Break);
+        assert_eq!(program.statements[1], Statement::Continue);
     }
 }

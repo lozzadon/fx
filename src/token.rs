@@ -23,32 +23,45 @@ pub enum Token {
     Try,    // try
     Catch,  // catch
     Throw,  // throw
+    Break,  // break
+    Continue, // continue
 
     // Operators
-    Assign,      // =
-    Plus,        // +
-    Minus,       // -
-    Asterisk,    // *
-    Slash,       // /
-    Equal,       // ==
-    NotEqual,    // !=
-    LessThan,    // <
-    GreaterThan, // >
-    FatArrow,    // =>
-    Arrow,       // ->
-    Bang,        // !
-    And,         // &&
-    Or,          // ||
+    Assign,          // =
+    Plus,            // +
+    Minus,           // -
+    Asterisk,        // *
+    Slash,           // /
+    Percent,         // %
+    PlusAssign,      // +=
+    MinusAssign,     // -=
+    AsteriskAssign,  // *=
+    SlashAssign,     // /=
+    PercentAssign,   // %=
+    Equal,           // ==
+    NotEqual,        // !=
+    LessThan,        // <
+    GreaterThan,     // >
+    LessEqual,       // <=
+    GreaterEqual,    // >=
+    FatArrow,        // =>
+    Arrow,           // ->
+    Bang,            // !
+    And,             // &&
+    Or,              // ||
+    DotDot,          // ..
+    DotDotEqual,     // ..=
+    Dot,             // .
 
     // Delimiters
-    Comma,       // ,
-    Colon,       // :
-    LParen,      // (
-    RParen,      // )
-    LBrace,      // {
-    RBrace,      // }
-    LBracket,    // [
-    RBracket,    // ]
+    Comma,           // ,
+    Colon,           // :
+    LParen,          // (
+    RParen,          // )
+    LBrace,          // {
+    RBrace,          // }
+    LBracket,        // [
+    RBracket,        // ]
 
     // Special
     Illegal(char),

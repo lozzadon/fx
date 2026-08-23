@@ -1,4 +1,3 @@
-use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Opcode {
@@ -20,6 +19,17 @@ pub enum Opcode {
     OpNull,
     OpSetGlobal,
     OpGetGlobal,
+    OpLessThan,
+    OpLessEqual,
+    OpGreaterEqual,
+    OpModulo,
+    OpRange,
+    OpArray,
+    OpIndex,
+    OpGetBuiltin,
+    OpCall,
+    OpIterInit,
+    OpIterNext,
 }
 
 impl From<u8> for Opcode {
@@ -43,12 +53,24 @@ impl From<u8> for Opcode {
             15 => Opcode::OpNull,
             16 => Opcode::OpSetGlobal,
             17 => Opcode::OpGetGlobal,
+            18 => Opcode::OpLessThan,
+            19 => Opcode::OpLessEqual,
+            20 => Opcode::OpGreaterEqual,
+            21 => Opcode::OpModulo,
+            22 => Opcode::OpRange,
+            23 => Opcode::OpArray,
+            24 => Opcode::OpIndex,
+            25 => Opcode::OpGetBuiltin,
+            26 => Opcode::OpCall,
+            27 => Opcode::OpIterInit,
+            28 => Opcode::OpIterNext,
             _ => panic!("Unknown opcode: {}", v),
         }
     }
 }
 
 pub struct Definition {
+    #[allow(dead_code)]
     pub name: &'static str,
     pub operand_widths: Vec<usize>,
 }
@@ -73,6 +95,17 @@ pub fn lookup(op: u8) -> Definition {
         Opcode::OpNull => Definition { name: "OpNull", operand_widths: vec![] },
         Opcode::OpSetGlobal => Definition { name: "OpSetGlobal", operand_widths: vec![2] },
         Opcode::OpGetGlobal => Definition { name: "OpGetGlobal", operand_widths: vec![2] },
+        Opcode::OpLessThan => Definition { name: "OpLessThan", operand_widths: vec![] },
+        Opcode::OpLessEqual => Definition { name: "OpLessEqual", operand_widths: vec![] },
+        Opcode::OpGreaterEqual => Definition { name: "OpGreaterEqual", operand_widths: vec![] },
+        Opcode::OpModulo => Definition { name: "OpModulo", operand_widths: vec![] },
+        Opcode::OpRange => Definition { name: "OpRange", operand_widths: vec![1] },
+        Opcode::OpArray => Definition { name: "OpArray", operand_widths: vec![2] },
+        Opcode::OpIndex => Definition { name: "OpIndex", operand_widths: vec![] },
+        Opcode::OpGetBuiltin => Definition { name: "OpGetBuiltin", operand_widths: vec![2] },
+        Opcode::OpCall => Definition { name: "OpCall", operand_widths: vec![1] },
+        Opcode::OpIterInit => Definition { name: "OpIterInit", operand_widths: vec![] },
+        Opcode::OpIterNext => Definition { name: "OpIterNext", operand_widths: vec![2] },
     }
 }
 
@@ -95,6 +128,8 @@ pub fn make(op: Opcode, operands: &[usize]) -> Vec<u8> {
         if width == 2 {
             instruction[offset] = (*o >> 8) as u8;
             instruction[offset + 1] = *o as u8;
+        } else if width == 1 {
+            instruction[offset] = *o as u8;
         }
         offset += width;
     }

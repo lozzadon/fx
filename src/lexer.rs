@@ -62,19 +62,78 @@ impl Lexer {
                     Token::Assign
                 }
             }
-            '+' => Token::Plus,
+            '+' => {
+                if self.peek_char() == '=' {
+                    self.read_char();
+                    Token::PlusAssign
+                } else {
+                    Token::Plus
+                }
+            }
             '-' => {
                 if self.peek_char() == '>' {
                     self.read_char();
                     Token::Arrow
+                } else if self.peek_char() == '=' {
+                    self.read_char();
+                    Token::MinusAssign
                 } else {
                     Token::Minus
                 }
             }
-            '*' => Token::Asterisk,
-            '/' => Token::Slash,
-            '<' => Token::LessThan,
-            '>' => Token::GreaterThan,
+            '*' => {
+                if self.peek_char() == '=' {
+                    self.read_char();
+                    Token::AsteriskAssign
+                } else {
+                    Token::Asterisk
+                }
+            }
+            '/' => {
+                if self.peek_char() == '=' {
+                    self.read_char();
+                    Token::SlashAssign
+                } else {
+                    Token::Slash
+                }
+            }
+            '%' => {
+                if self.peek_char() == '=' {
+                    self.read_char();
+                    Token::PercentAssign
+                } else {
+                    Token::Percent
+                }
+            }
+            '<' => {
+                if self.peek_char() == '=' {
+                    self.read_char();
+                    Token::LessEqual
+                } else {
+                    Token::LessThan
+                }
+            }
+            '>' => {
+                if self.peek_char() == '=' {
+                    self.read_char();
+                    Token::GreaterEqual
+                } else {
+                    Token::GreaterThan
+                }
+            }
+            '.' => {
+                if self.peek_char() == '.' {
+                    self.read_char();
+                    if self.peek_char() == '=' {
+                        self.read_char();
+                        Token::DotDotEqual
+                    } else {
+                        Token::DotDot
+                    }
+                } else {
+                    Token::Dot
+                }
+            }
             '!' => {
                 if self.peek_char() == '=' {
                     self.read_char();
@@ -127,11 +186,54 @@ impl Lexer {
 
     fn read_string(&mut self) -> Token {
         self.read_char(); // skip the opening quote
-        let start_pos = self.position;
+        let mut string_val = String::new();
         while self.ch != '"' && self.ch != '\0' {
+            if self.ch == '\\' {
+                let peek = self.peek_char();
+                match peek {
+                    'n' => {
+                        self.read_char();
+                        string_val.push('\n');
+                    }
+                    't' => {
+                        self.read_char();
+                        string_val.push('\t');
+                    }
+                    'r' => {
+                        self.read_char();
+                        string_val.push('\r');
+                    }
+                    '0' => {
+                        self.read_char();
+                        string_val.push('\0');
+                    }
+                    '"' => {
+                        self.read_char();
+                        string_val.push('"');
+                    }
+                    '\\' => {
+                        self.read_char();
+                        string_val.push('\\');
+                    }
+                    '{' => {
+                        self.read_char();
+                        string_val.push('\\');
+                        string_val.push('{');
+                    }
+                    '}' => {
+                        self.read_char();
+                        string_val.push('\\');
+                        string_val.push('}');
+                    }
+                    _ => {
+                        string_val.push(self.ch);
+                    }
+                }
+            } else {
+                string_val.push(self.ch);
+            }
             self.read_char();
         }
-        let string_val: String = self.input[start_pos..self.position].iter().collect();
         Token::String(string_val)
     }
 
@@ -149,6 +251,18 @@ impl Lexer {
 
         while self.ch.is_ascii_digit() || self.ch == '.' {
             if self.ch == '.' {
+                // Guard 1: If next char is another dot (.. or ..=), STOP immediately.
+                if self.peek_char() == '.' {
+                    break;
+                }
+                // Guard 2: If next char is alphabetic/underscore (1.abs), STOP immediately.
+                if self.is_letter(self.peek_char()) || self.peek_char() == '_' {
+                    break;
+                }
+                // Guard 3: If already marked as float, a second dot cannot be part of the number.
+                if is_float {
+                    break;
+                }
                 is_float = true;
             }
             self.read_char();
@@ -201,6 +315,8 @@ impl Lexer {
             "try" => Token::Try,
             "catch" => Token::Catch,
             "throw" => Token::Throw,
+            "break" => Token::Break,
+            "continue" => Token::Continue,
             _ => Token::Ident(ident.to_string()),
         }
     }
@@ -225,5 +341,113 @@ impl Lexer {
         }
         
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_next_token() {
+        let input = r#"
+            let five = 5
+            let ten = 10
+            let add = func(x, y) {
+                x + y
+            }
+            let result = add(five, ten)
+            !-/*5
+            5 < 10 > 5
+            if (5 < 10) {
+                return true
+            } else {
+                return false
+            }
+            10 == 10
+            10 != 9
+            "foobar"
+            "foo bar"
+            [1, 2]
+            {"foo": "bar"}
+        "#;
+        
+        let mut lexer = Lexer::new(input);
+        loop {
+            let token = lexer.next_token();
+            if token == Token::Eof {
+                break;
+            }
+        }
+    }
+
+    #[test]
+    fn test_compound_and_relational_tokens() {
+        let input = "+= -= *= /= %= <= >= %";
+        let mut lexer = Lexer::new(input);
+
+        let expected = vec![
+            Token::PlusAssign,
+            Token::MinusAssign,
+            Token::AsteriskAssign,
+            Token::SlashAssign,
+            Token::PercentAssign,
+            Token::LessEqual,
+            Token::GreaterEqual,
+            Token::Percent,
+            Token::Eof,
+        ];
+
+        for exp in expected {
+            let tok = lexer.next_token();
+            assert_eq!(tok, exp);
+        }
+    }
+
+    #[test]
+    fn test_range_tokens_and_lookahead() {
+        let input = "0..10 1..=5 0.5..10.5 1.abs";
+        let mut lexer = Lexer::new(input);
+
+        let expected = vec![
+            Token::Int(0),
+            Token::DotDot,
+            Token::Int(10),
+            Token::Int(1),
+            Token::DotDotEqual,
+            Token::Int(5),
+            Token::Float(0.5),
+            Token::DotDot,
+            Token::Float(10.5),
+            Token::Int(1),
+            Token::Dot,
+            Token::Ident("abs".to_string()),
+            Token::Eof,
+        ];
+
+        for exp in expected {
+            let tok = lexer.next_token();
+            assert_eq!(tok, exp);
+        }
+    }
+
+    #[test]
+    fn test_string_escapes_and_braces() {
+        let input = r#""hello\nworld" "tab\tseparated" "quote: \"hello\"" "backslash: \\" "escaped brace: \{name\}""#;
+        let mut lexer = Lexer::new(input);
+
+        let expected = vec![
+            Token::String("hello\nworld".to_string()),
+            Token::String("tab\tseparated".to_string()),
+            Token::String("quote: \"hello\"".to_string()),
+            Token::String("backslash: \\".to_string()),
+            Token::String("escaped brace: \\{name\\}".to_string()),
+            Token::Eof,
+        ];
+
+        for exp in expected {
+            let tok = lexer.next_token();
+            assert_eq!(tok, exp);
+        }
     }
 }

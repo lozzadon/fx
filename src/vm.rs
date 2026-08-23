@@ -4,11 +4,20 @@ use crate::code::{Opcode, Instructions};
 
 const STACK_SIZE: usize = 2048;
 
+fn is_truthy(obj: &Object) -> bool {
+    match obj {
+        Object::Null => false,
+        Object::Boolean(b) => *b,
+        _ => true,
+    }
+}
+
 pub struct VM {
     constants: Vec<Object>,
     instructions: Instructions,
     stack: Vec<Object>,
     sp: usize, // Stack pointer
+    pub globals: Vec<Object>,
     pub last_popped: Option<Object>,
 }
 
@@ -19,6 +28,7 @@ impl VM {
             instructions: bytecode.instructions,
             stack: vec![Object::Null; STACK_SIZE],
             sp: 0,
+            globals: vec![Object::Null; 65536],
             last_popped: None,
         }
     }
@@ -40,28 +50,316 @@ impl VM {
                     
                     self.push(self.constants[const_index].clone())?;
                 }
-                Opcode::OpAdd | Opcode::OpSub | Opcode::OpMul | Opcode::OpDiv => {
+                Opcode::OpAdd | Opcode::OpSub | Opcode::OpMul | Opcode::OpDiv | Opcode::OpModulo => {
                     let right = self.pop()?;
                     let left = self.pop()?;
                     
-                    if let (Object::Integer(l), Object::Integer(r)) = (left, right) {
+                    if let (Object::Integer(l), Object::Integer(r)) = (&left, &right) {
                         let result = match op {
                             Opcode::OpAdd => l + r,
                             Opcode::OpSub => l - r,
                             Opcode::OpMul => l * r,
-                            Opcode::OpDiv => l / r,
+                            Opcode::OpDiv => {
+                                if *r == 0 { return Err("division by zero".to_string()); }
+                                l / r
+                            }
+                            Opcode::OpModulo => {
+                                if *r == 0 { return Err("division by zero".to_string()); }
+                                l % r
+                            }
                             _ => unreachable!(),
                         };
                         self.push(Object::Integer(result))?;
+                    } else if let (Object::Float(l), Object::Float(r)) = (&left, &right) {
+                        let result = match op {
+                            Opcode::OpAdd => l + r,
+                            Opcode::OpSub => l - r,
+                            Opcode::OpMul => l * r,
+                            Opcode::OpDiv => {
+                                if *r == 0.0 { return Err("division by zero".to_string()); }
+                                l / r
+                            }
+                            Opcode::OpModulo => {
+                                if *r == 0.0 { return Err("division by zero".to_string()); }
+                                l % r
+                            }
+                            _ => unreachable!(),
+                        };
+                        self.push(Object::Float(result))?;
+                    } else if let (Object::Float(l), Object::Integer(r)) = (&left, &right) {
+                        let r_f = *r as f64;
+                        let result = match op {
+                            Opcode::OpAdd => l + r_f,
+                            Opcode::OpSub => l - r_f,
+                            Opcode::OpMul => l * r_f,
+                            Opcode::OpDiv => {
+                                if r_f == 0.0 { return Err("division by zero".to_string()); }
+                                l / r_f
+                            }
+                            Opcode::OpModulo => {
+                                if r_f == 0.0 { return Err("division by zero".to_string()); }
+                                l % r_f
+                            }
+                            _ => unreachable!(),
+                        };
+                        self.push(Object::Float(result))?;
+                    } else if let (Object::Integer(l), Object::Float(r)) = (&left, &right) {
+                        let l_f = *l as f64;
+                        let result = match op {
+                            Opcode::OpAdd => l_f + r,
+                            Opcode::OpSub => l_f - r,
+                            Opcode::OpMul => l_f * r,
+                            Opcode::OpDiv => {
+                                if *r == 0.0 { return Err("division by zero".to_string()); }
+                                l_f / r
+                            }
+                            Opcode::OpModulo => {
+                                if *r == 0.0 { return Err("division by zero".to_string()); }
+                                l_f % r
+                            }
+                            _ => unreachable!(),
+                        };
+                        self.push(Object::Float(result))?;
+                    } else if let (Object::String(l), Object::String(r)) = (&left, &right) {
+                        if op == Opcode::OpAdd {
+                            self.push(Object::String(format!("{}{}", l, r)))?;
+                        } else {
+                            return Err(format!("Unsupported operator for strings: {:?}", op));
+                        }
+                    } else if matches!(left, Object::String(_)) || matches!(right, Object::String(_)) {
+                        if op == Opcode::OpAdd {
+                            self.push(Object::String(format!("{}{}", left, right)))?;
+                        } else {
+                            return Err(format!("Unsupported operator for string concatenation: {:?}", op));
+                        }
                     } else {
                         return Err("Unsupported types for binary operation".to_string());
                     }
+                }
+                Opcode::OpEqual | Opcode::OpNotEqual => {
+                    let right = self.pop()?;
+                    let left = self.pop()?;
+                    let eq = left == right;
+                    self.push(Object::Boolean(if op == Opcode::OpEqual { eq } else { !eq }))?;
+                }
+                Opcode::OpLessThan | Opcode::OpGreaterThan | Opcode::OpLessEqual | Opcode::OpGreaterEqual => {
+                    let right = self.pop()?;
+                    let left = self.pop()?;
+                    let res = match (&left, &right) {
+                        (Object::Integer(l), Object::Integer(r)) => match op {
+                            Opcode::OpLessThan => l < r,
+                            Opcode::OpGreaterThan => l > r,
+                            Opcode::OpLessEqual => l <= r,
+                            Opcode::OpGreaterEqual => l >= r,
+                            _ => unreachable!(),
+                        },
+                        (Object::Float(l), Object::Float(r)) => match op {
+                            Opcode::OpLessThan => l < r,
+                            Opcode::OpGreaterThan => l > r,
+                            Opcode::OpLessEqual => l <= r,
+                            Opcode::OpGreaterEqual => l >= r,
+                            _ => unreachable!(),
+                        },
+                        (Object::Integer(l), Object::Float(r)) => match op {
+                            Opcode::OpLessThan => (*l as f64) < *r,
+                            Opcode::OpGreaterThan => (*l as f64) > *r,
+                            Opcode::OpLessEqual => (*l as f64) <= *r,
+                            Opcode::OpGreaterEqual => (*l as f64) >= *r,
+                            _ => unreachable!(),
+                        },
+                        (Object::Float(l), Object::Integer(r)) => match op {
+                            Opcode::OpLessThan => *l < (*r as f64),
+                            Opcode::OpGreaterThan => *l > (*r as f64),
+                            Opcode::OpLessEqual => *l <= (*r as f64),
+                            Opcode::OpGreaterEqual => *l >= (*r as f64),
+                            _ => unreachable!(),
+                        },
+                        _ => return Err(format!("Cannot compare {:?} and {:?}", left, right)),
+                    };
+                    self.push(Object::Boolean(res))?;
+                }
+                Opcode::OpMinus => {
+                    let right = self.pop()?;
+                    match right {
+                        Object::Integer(i) => self.push(Object::Integer(-i))?,
+                        Object::Float(f) => self.push(Object::Float(-f))?,
+                        _ => return Err(format!("Unsupported type for prefix -: {:?}", right)),
+                    }
+                }
+                Opcode::OpBang => {
+                    let right = self.pop()?;
+                    let truthy = is_truthy(&right);
+                    self.push(Object::Boolean(!truthy))?;
                 }
                 Opcode::OpPop => {
                     let popped = self.pop()?;
                     self.last_popped = Some(popped);
                 }
-                _ => return Err(format!("Opcode not implemented: {:?}", op)),
+                Opcode::OpTrue => {
+                    self.push(Object::Boolean(true))?;
+                }
+                Opcode::OpFalse => {
+                    self.push(Object::Boolean(false))?;
+                }
+                Opcode::OpNull => {
+                    self.push(Object::Null)?;
+                }
+                Opcode::OpSetGlobal => {
+                    let global_index = ((self.instructions[ip + 1] as usize) << 8) | (self.instructions[ip + 2] as usize);
+                    ip += 2;
+                    self.globals[global_index] = self.pop()?;
+                }
+                Opcode::OpGetGlobal => {
+                    let global_index = ((self.instructions[ip + 1] as usize) << 8) | (self.instructions[ip + 2] as usize);
+                    ip += 2;
+                    self.push(self.globals[global_index].clone())?;
+                }
+                Opcode::OpJump => {
+                    let target = ((self.instructions[ip + 1] as usize) << 8) | (self.instructions[ip + 2] as usize);
+                    ip = target;
+                    continue;
+                }
+                Opcode::OpJumpNotTruthy => {
+                    let target = ((self.instructions[ip + 1] as usize) << 8) | (self.instructions[ip + 2] as usize);
+                    let condition = self.pop()?;
+                    if !is_truthy(&condition) {
+                        ip = target;
+                        continue;
+                    } else {
+                        ip += 2;
+                    }
+                }
+                Opcode::OpRange => {
+                    let inclusive = self.instructions[ip + 1] != 0;
+                    ip += 1;
+                    let end_obj = self.pop()?;
+                    let start_obj = self.pop()?;
+                    match (start_obj, end_obj) {
+                        (Object::Integer(start), Object::Integer(end)) => {
+                            self.push(Object::Range { start, end, inclusive })?;
+                        }
+                        _ => return Err("Range operands must be integers".to_string()),
+                    }
+                }
+                Opcode::OpArray => {
+                    let num_elements = ((self.instructions[ip + 1] as usize) << 8) | (self.instructions[ip + 2] as usize);
+                    ip += 2;
+                    let mut elements = vec![Object::Null; num_elements];
+                    for i in (0..num_elements).rev() {
+                        elements[i] = self.pop()?;
+                    }
+                    self.push(Object::Array(elements))?;
+                }
+                Opcode::OpIndex => {
+                    let index = self.pop()?;
+                    let container = self.pop()?;
+                    match (container, index) {
+                        (Object::Array(elements), Object::Integer(idx)) => {
+                            if idx < 0 || idx as usize >= elements.len() {
+                                self.push(Object::Null)?;
+                            } else {
+                                self.push(elements[idx as usize].clone())?;
+                            }
+                        }
+                        (Object::Hash(pairs), index_val) => {
+                            let hash_key = index_val.get_hash_key().map_err(|e| e)?;
+                            if let Some(val) = pairs.get(&hash_key) {
+                                self.push(val.clone())?;
+                            } else {
+                                self.push(Object::Null)?;
+                            }
+                        }
+                        (c, _) => return Err(format!("Index operator not supported for {:?}", c)),
+                    }
+                }
+                Opcode::OpGetBuiltin => {
+                    let builtin_index = ((self.instructions[ip + 1] as usize) << 8) | (self.instructions[ip + 2] as usize);
+                    ip += 2;
+                    if builtin_index < crate::compiler::BUILTINS.len() {
+                        let name = crate::compiler::BUILTINS[builtin_index];
+                        self.push(Object::Builtin(name.to_string()))?;
+                    } else {
+                        return Err(format!("Builtin index out of bounds: {}", builtin_index));
+                    }
+                }
+                Opcode::OpCall => {
+                    let num_args = self.instructions[ip + 1] as usize;
+                    ip += 1;
+                    let mut args = vec![Object::Null; num_args];
+                    for i in (0..num_args).rev() {
+                        args[i] = self.pop()?;
+                    }
+                    let callee = self.pop()?;
+                    match callee {
+                        Object::Builtin(name) => {
+                            let result = crate::evaluator::apply_builtin(&name, args);
+                            if let Object::Error(err) = result {
+                                return Err(err);
+                            }
+                            self.push(result)?;
+                        }
+                        _ => return Err(format!("Calling non-builtin object in VM is not supported: {:?}", callee)),
+                    }
+                }
+                Opcode::OpIterInit => {
+                    let iterable = self.pop()?;
+                    match iterable {
+                        Object::Range { .. } | Object::Array(_) => {
+                            self.push(Object::Iterator {
+                                target: Box::new(iterable),
+                                current: 0,
+                            })?;
+                        }
+                        _ => return Err(format!("Cannot iterate over {:?}", iterable)),
+                    }
+                }
+                Opcode::OpIterNext => {
+                    let jump_target = ((self.instructions[ip + 1] as usize) << 8) | (self.instructions[ip + 2] as usize);
+                    let mut iter_obj = self.stack[self.sp - 1].clone();
+                    match &mut iter_obj {
+                        Object::Iterator { target, current } => {
+                            match target.as_ref() {
+                                Object::Range { start, end, inclusive } => {
+                                    let curr_val = match start.checked_add(*current) {
+                                        Some(v) => v,
+                                        None => {
+                                            self.pop()?;
+                                            ip = jump_target;
+                                            continue;
+                                        }
+                                    };
+                                    let has_next = if *inclusive { curr_val <= *end } else { curr_val < *end };
+                                    if has_next {
+                                        let next_elem = Object::Integer(curr_val);
+                                        *current += 1;
+                                        self.stack[self.sp - 1] = iter_obj;
+                                        self.push(next_elem)?;
+                                        ip += 2;
+                                    } else {
+                                        self.pop()?; // pop iterator
+                                        ip = jump_target;
+                                        continue;
+                                    }
+                                }
+                                Object::Array(elements) => {
+                                    if (*current as usize) < elements.len() {
+                                        let next_elem = elements[*current as usize].clone();
+                                        *current += 1;
+                                        self.stack[self.sp - 1] = iter_obj;
+                                        self.push(next_elem)?;
+                                        ip += 2;
+                                    } else {
+                                        self.pop()?; // pop iterator
+                                        ip = jump_target;
+                                        continue;
+                                    }
+                                }
+                                _ => return Err("Invalid iterator target".to_string()),
+                            }
+                        }
+                        _ => return Err("Expected iterator on stack for OpIterNext".to_string()),
+                    }
+                }
             }
             
             ip += 1;

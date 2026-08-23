@@ -8,10 +8,11 @@ mod code;
 mod compiler;
 mod vm;
 mod formatter;
+#[cfg(test)]
+mod tests;
 
 use std::env;
 use std::fs;
-use std::io::{self, Write};
 use std::rc::Rc;
 use std::cell::RefCell;
 use crate::lexer::Lexer;
@@ -77,7 +78,9 @@ fn run_file_vm(filename: &str) {
     }
 
     if let Some(result) = machine.last_popped_elem() {
-        println!("{}", result);
+        if *result != crate::object::Object::Null {
+            println!("{}", result);
+        }
     }
 }
 
@@ -141,7 +144,6 @@ fn run_file(filename: &str) {
 
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
-use std::path::PathBuf;
 
 fn start_repl() {
     println!("Welcome to the f(x) programming language!");

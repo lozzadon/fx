@@ -36,6 +36,12 @@ fn format_statement(stmt: &Statement, level: usize) -> String {
             }
             out
         }
+        Statement::Break => {
+            format!("{}break", indent(level))
+        }
+        Statement::Continue => {
+            format!("{}continue", indent(level))
+        }
     }
 }
 
@@ -52,6 +58,10 @@ fn format_expression(expr: &Expression, level: usize) -> String {
         }
         Expression::Infix { left, operator, right } => {
             format!("{} {} {}", format_expression(left, level), operator, format_expression(right, level))
+        }
+        Expression::Range { start, end, inclusive } => {
+            let op = if *inclusive { "..=" } else { ".." };
+            format!("{}{}{}", format_expression(start, level), op, format_expression(end, level))
         }
         Expression::Array(elements) => {
             let els: Vec<String> = elements.iter().map(|e| format_expression(e, level)).collect();

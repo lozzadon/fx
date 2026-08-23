@@ -12,6 +12,8 @@ pub enum Statement {
     Return(Expression),
     Expression(Expression),
     Block(Vec<Statement>), 
+    Break,
+    Continue,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -58,6 +60,11 @@ pub enum Expression {
     Index {
         left: Box<Expression>, // The array or hash
         index: Box<Expression>, // The index inside [ ]
+    },
+    Range {
+        start: Box<Expression>,
+        end: Box<Expression>,
+        inclusive: bool,
     },
     NullLiteral,
     HashLiteral(Vec<(Expression, Expression)>),
