@@ -18,9 +18,9 @@ let render = func() {
     })
     
     ui.VStack([
-        ui.Text("f(x) Counter Dashboard"),
+        ui.Text("f(x) Counter Dashboard", {"size": 28, "bold": true}),
         ui.HStack([btn1, btn2, btn3]),
-        ui.Text("Total Sum: " + total),
+        ui.Text("Total Sum: " + total, {"size": 20}),
         reset
     ])
 }

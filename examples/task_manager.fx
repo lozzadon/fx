@@ -1,10 +1,21 @@
 let ui = import("std:topia")
 
-var tasks = []
+struct Task {
+    name: String,
+    completed: Bool,
+}
+
+var tasks = [
+    Task("Learn f(x)", true),
+    Task("Build Topia MVP", false)
+]
+var new_task_name = ""
 
 let add_task = func() {
-    let new_task = "Task " + (len(tasks) + 1)
-    push(tasks, new_task)
+    if len(new_task_name) > 0 {
+        push(tasks, Task(new_task_name, false))
+        new_task_name = ""
+    }
 }
 
 let clear_tasks = func() {
@@ -17,8 +28,19 @@ let app_builder = func() {
     
     var i = 0
     while i < len(tasks) {
-        let task_name = tasks[i]
-        push(task_nodes, ui.Text("• " + task_name))
+        let idx = i
+        let task = tasks[idx]
+        
+        let on_toggle = func(checked) {
+            tasks[idx].completed = checked
+        }
+        
+        let label = task.name
+        if task.completed {
+            push(task_nodes, ui.Checkbox(task.completed, label, on_toggle))
+        } else {
+            push(task_nodes, ui.Checkbox(task.completed, label, on_toggle))
+        }
         i = i + 1
     }
     
@@ -26,10 +48,17 @@ let app_builder = func() {
         push(task_nodes, ui.Text("No tasks yet. Take a break!"))
     }
     
+    let on_input_change = func(val) {
+        new_task_name = val
+    }
+    
     ui.VStack([
-        ui.Text("f(x) Task Manager"),
+        ui.Text("f(x) Task Manager", {"size": 24, "bold": true}),
         ui.HStack([
-            ui.Button("Add Task", add_task),
+            ui.TextInput(new_task_name, on_input_change),
+            ui.Button("Add", add_task)
+        ]),
+        ui.HStack([
             ui.Button("Clear Tasks", clear_tasks)
         ]),
         ui.VStack(task_nodes)

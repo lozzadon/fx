@@ -14,6 +14,13 @@ pub fn make_module() -> Object {
     map.insert(HashKey::String("_module".to_string()), Object::String("topia".to_string()));
     map.insert(HashKey::String("App".to_string()), Object::Builtin("std:topia:App".to_string()));
     map.insert(HashKey::String("app".to_string()), Object::Builtin("std:topia:App".to_string()));
+    map.insert(HashKey::String("TextInput".to_string()), Object::Builtin("std:topia:TextInput".to_string()));
+
+    map.insert(HashKey::String("text_input".to_string()), Object::Builtin("std:topia:TextInput".to_string()));
+
+    map.insert(HashKey::String("Checkbox".to_string()), Object::Builtin("std:topia:Checkbox".to_string()));
+
+    map.insert(HashKey::String("checkbox".to_string()), Object::Builtin("std:topia:Checkbox".to_string()));
     map.insert(HashKey::String("Text".to_string()), Object::Builtin("std:topia:Text".to_string()));
     map.insert(HashKey::String("text".to_string()), Object::Builtin("std:topia:Text".to_string()));
     map.insert(HashKey::String("Button".to_string()), Object::Builtin("std:topia:Button".to_string()));
@@ -239,6 +246,10 @@ pub fn object_to_node(obj: &Object) -> TopiaNode {
                         "VStack"
                     } else if map.contains_key(&HashKey::String("on_click".to_string())) || map.contains_key(&HashKey::String("callback".to_string())) {
                         "Button"
+                    } else if map.contains_key(&HashKey::String("checked".to_string())) {
+                        "Checkbox"
+                    } else if map.contains_key(&HashKey::String("text".to_string())) && map.contains_key(&HashKey::String("on_change".to_string())) {
+                        "TextInput"
                     } else if map.contains_key(&HashKey::String("text".to_string())) {
                         "Text"
                     } else {
@@ -255,7 +266,48 @@ pub fn object_to_node(obj: &Object) -> TopiaNode {
                         Some(other) => format!("{}", other),
                         None => String::new(),
                     };
-                    TopiaNode::text(text)
+                    let size = match map.get(&HashKey::String("size".to_string())) {
+                        Some(Object::Integer(i)) => Some(*i as f32),
+                        Some(Object::Float(f)) => Some(*f as f32),
+                        _ => None,
+                    };
+                    let bold = match map.get(&HashKey::String("bold".to_string())) {
+                        Some(Object::Boolean(b)) => *b,
+                        _ => false,
+                    };
+                    TopiaNode::text_styled(text, size, bold)
+                }
+                "TextInput" | "textinput" | "text_input" => {
+                    let text = match map.get(&HashKey::String("text".to_string())) {
+                        Some(Object::String(s)) => s.clone(),
+                        Some(other) => format!("{}", other),
+                        None => String::new(),
+                    };
+                    if let Some(cb_obj) = map.get(&HashKey::String("on_change".to_string())).cloned() {
+                        TopiaNode::text_input(text, move |new_text| {
+                            crate::evaluator::apply_function(cb_obj.clone(), vec![Object::String(new_text)]);
+                        })
+                    } else {
+                        TopiaNode::text_input(text, |_| {})
+                    }
+                }
+                "Checkbox" | "checkbox" => {
+                    let checked = match map.get(&HashKey::String("checked".to_string())) {
+                        Some(Object::Boolean(b)) => *b,
+                        _ => false,
+                    };
+                    let label = match map.get(&HashKey::String("label".to_string())) {
+                        Some(Object::String(s)) => s.clone(),
+                        Some(other) => format!("{}", other),
+                        None => String::new(),
+                    };
+                    if let Some(cb_obj) = map.get(&HashKey::String("on_change".to_string())).cloned() {
+                        TopiaNode::checkbox(checked, label, move |new_val| {
+                            crate::evaluator::apply_function(cb_obj.clone(), vec![Object::Boolean(new_val)]);
+                        })
+                    } else {
+                        TopiaNode::checkbox(checked, label, |_| {})
+                    }
                 }
                 "Button" | "button" => {
                     let label = match map.get(&HashKey::String("label".to_string()))
