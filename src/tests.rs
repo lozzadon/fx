@@ -347,7 +347,7 @@ fn test_circular_reference_json_stringify_safe() {
 fn test_json_surrogate_pairs_decoding() {
     let input = r#"
         let json = import("std:json")
-        let parsed = json.parse("\{ \"emoji\": \"\uD835\uDC00 \uD835\uDC35\" \}")
+        let parsed = json.parse("\{ \"symbol\": \"\uD835\uDC00 \uD835\uDC35\" \}")
         parsed.symbol
     "#;
     assert_eq!(run_ast(input), Object::String("𝐀 𝐵".to_string()));
@@ -1156,7 +1156,7 @@ fn test_topia_adversarial_unicode_and_special_strings() {
         let app = topia.App("Topia 界面框架 日本語・한국어・العربية", 1024, 768)
         let t_cjk = topia.Text("こんにちは世界！你好，世界！안녕하세요!")
         let t_arabic = topia.Text("مرحبا بالعالم - تجربة واجهة المستخدم")
-        let t_emoji = topia.Text("100% Declarative UI")
+        let t_symbol = topia.Text("100% Declarative UI")
         let t_special = topia.Text("Line 1\nLine 2\tTabbed\r\nLine 3 \\ \"Quotes\"")
         let t_empty = topia.Text("")
         let btn_unicode = topia.Button("点击计数 / Click +1", func() { return "ok" })
@@ -1165,7 +1165,7 @@ fn test_topia_adversarial_unicode_and_special_strings() {
         let stack = topia.VStack([
             t_cjk,
             t_arabic,
-            t_emoji,
+            t_symbol,
             t_special,
             t_empty,
             btn_unicode,
@@ -1175,7 +1175,7 @@ fn test_topia_adversarial_unicode_and_special_strings() {
             app.title,
             t_cjk.text,
             t_arabic.text,
-            t_emoji.text,
+            t_symbol.text,
             t_special.text,
             t_empty.text,
             btn_unicode.label,
