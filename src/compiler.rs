@@ -61,11 +61,17 @@ impl SymbolTable {
     }
 }
 
+pub struct LoopContext {
+    pub loop_start: usize,
+    pub break_positions: Vec<usize>,
+}
+
 pub struct Compiler {
     pub instructions: Instructions,
     pub constants: Vec<Object>,
     pub symbol_table: SymbolTable,
     pub env: Rc<RefCell<Environment>>,
+    pub loop_stack: Vec<LoopContext>,
 }
 
 impl Compiler {
@@ -75,6 +81,7 @@ impl Compiler {
             constants: Vec::new(),
             symbol_table: SymbolTable::new(),
             env: Rc::new(RefCell::new(Environment::new())),
+            loop_stack: Vec::new(),
         }
     }
 
@@ -135,6 +142,22 @@ impl Compiler {
                 for stmt in statements {
                     self.compile_statement(stmt)?;
                 }
+            }
+            Statement::Break => {
+                if self.loop_stack.is_empty() {
+                    return Err("break statement not within a loop".to_string());
+                }
+                let pos = self.emit(Opcode::OpJump, &[0xFFFF]);
+                if let Some(ctx) = self.loop_stack.last_mut() {
+                    ctx.break_positions.push(pos);
+                }
+            }
+            Statement::Continue => {
+                if self.loop_stack.is_empty() {
+                    return Err("continue statement not within a loop".to_string());
+                }
+                let target = self.loop_stack.last().unwrap().loop_start;
+                self.emit(Opcode::OpJump, &[target]);
             }
             _ => return Err(format!("Unsupported statement in VM compilation: {:?}", s)),
         }
@@ -314,10 +337,22 @@ impl Compiler {
                 let loop_start = self.instructions.len();
                 self.compile_expression(condition)?;
                 let jump_not_truthy_pos = self.emit(Opcode::OpJumpNotTruthy, &[0xFFFF]);
+                
+                self.loop_stack.push(LoopContext {
+                    loop_start,
+                    break_positions: Vec::new(),
+                });
+                
                 self.compile_statement(body)?;
                 self.emit(Opcode::OpJump, &[loop_start]);
                 let after_loop = self.instructions.len();
                 self.change_operand(jump_not_truthy_pos, after_loop);
+                
+                let ctx = self.loop_stack.pop().unwrap();
+                for pos in ctx.break_positions {
+                    self.change_operand(pos, after_loop);
+                }
+                
                 self.emit(Opcode::OpNull, &[]);
             }
             Expression::For { variable, iterable, body } => {
@@ -328,10 +363,22 @@ impl Compiler {
                 let prev_symbol = self.symbol_table.resolve(variable).cloned();
                 let symbol_index = self.symbol_table.define(variable.clone(), false);
                 self.emit(Opcode::OpSetGlobal, &[symbol_index]);
+                
+                self.loop_stack.push(LoopContext {
+                    loop_start,
+                    break_positions: Vec::new(),
+                });
+                
                 self.compile_statement(body)?;
                 self.emit(Opcode::OpJump, &[loop_start]);
                 let after_loop = self.instructions.len();
                 self.change_operand(iter_next_pos, after_loop);
+                
+                let ctx = self.loop_stack.pop().unwrap();
+                for pos in ctx.break_positions {
+                    self.change_operand(pos, after_loop);
+                }
+                
                 self.emit(Opcode::OpNull, &[]);
                 if let Some(prev) = prev_symbol {
                     if let Some(sym) = self.symbol_table.store.get_mut(variable) {

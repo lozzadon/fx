@@ -4,6 +4,10 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use crate::object::{HashKey, Object};
 
+thread_local! {
+    static VIRTUAL_ENV: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
+}
+
 pub fn make_module() -> Object {
     let mut map = HashMap::new();
     map.insert(HashKey::String("args".to_string()), Object::Builtin("std:os:args".to_string()));
@@ -31,6 +35,11 @@ pub fn apply(name: &str, args: Vec<Object>) -> Object {
             for (k, v) in env::vars() {
                 map.insert(HashKey::String(k), Object::String(v));
             }
+            VIRTUAL_ENV.with(|venv| {
+                for (k, v) in venv.borrow().iter() {
+                    map.insert(HashKey::String(k.clone()), Object::String(v.clone()));
+                }
+            });
             Object::Hash(Rc::new(RefCell::new(map)))
         }
         "get_env" => {
@@ -38,10 +47,21 @@ pub fn apply(name: &str, args: Vec<Object>) -> Object {
                 return Object::Error(format!("get_env expects 1 argument, got {}", args.len()));
             }
             match &args[0] {
-                Object::String(key) => match env::var(key) {
-                    Ok(val) => Object::String(val),
-                    Err(_) => Object::Null,
-                },
+                Object::String(key) => {
+                    let mut found = None;
+                    VIRTUAL_ENV.with(|venv| {
+                        if let Some(val) = venv.borrow().get(key) {
+                            found = Some(val.clone());
+                        }
+                    });
+                    if let Some(val) = found {
+                        return Object::String(val);
+                    }
+                    match env::var(key) {
+                        Ok(val) => Object::String(val),
+                        Err(_) => Object::Null,
+                    }
+                }
                 _ => Object::Error("get_env expects string key".to_string()),
             }
         }
@@ -51,9 +71,9 @@ pub fn apply(name: &str, args: Vec<Object>) -> Object {
             }
             match (&args[0], &args[1]) {
                 (Object::String(k), Object::String(v)) => {
-                    unsafe {
-                        env::set_var(k, v);
-                    }
+                    VIRTUAL_ENV.with(|venv| {
+                        venv.borrow_mut().insert(k.clone(), v.clone());
+                    });
                     Object::Boolean(true)
                 }
                 _ => Object::Error("set_env expects (string, string)".to_string()),

@@ -54,20 +54,36 @@ fn validate_path(path: &str) -> Result<PathBuf, String> {
         let normalized = normalize_path(&abs_path);
         let canon_root = root.canonicalize().unwrap_or_else(|_| normalize_path(root));
 
-        let mut matched_ancestor = false;
+        let mut canon_base = PathBuf::new();
+        let mut unexisting = PathBuf::new();
+        let mut matched = false;
+
         for ancestor in normalized.ancestors() {
             if let Ok(canon_ancestor) = ancestor.canonicalize() {
                 if !canon_ancestor.starts_with(&canon_root) {
                     return Err(format!("permission denied: path {:?} is outside sandboxed root {:?}", path, root));
                 }
-                matched_ancestor = true;
+                canon_base = canon_ancestor;
+                unexisting = normalized.strip_prefix(ancestor).unwrap().to_path_buf();
+                matched = true;
                 break;
             }
         }
 
-        if !matched_ancestor && !normalized.starts_with(&canon_root) && !normalized.starts_with(root) {
+        if !matched {
             return Err(format!("permission denied: path {:?} is outside sandboxed root {:?}", path, root));
         }
+
+        // Ensure no components in the unexisting suffix are dangling symlinks.
+        let mut current_check = canon_base.clone();
+        for comp in unexisting.components() {
+            current_check.push(comp);
+            if current_check.is_symlink() {
+                return Err(format!("permission denied: dangling symlink in path {:?}", path));
+            }
+        }
+
+        return Ok(canon_base.join(unexisting));
     }
     Ok(p.to_path_buf())
 }

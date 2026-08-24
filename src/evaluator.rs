@@ -520,6 +520,10 @@ pub fn apply_function(func: Object, args: Vec<Object>) -> Object {
             let evaluated = eval_statement(body, extended_env);
             let final_val = if let Object::ReturnValue(val) = evaluated {
                 *val
+            } else if let Object::Break = evaluated {
+                return Object::Error("break statement not within a loop".to_string());
+            } else if let Object::Continue = evaluated {
+                return Object::Error("continue statement not within a loop".to_string());
             } else {
                 evaluated
             };
