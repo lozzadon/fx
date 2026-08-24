@@ -347,10 +347,10 @@ fn test_circular_reference_json_stringify_safe() {
 fn test_json_surrogate_pairs_decoding() {
     let input = r#"
         let json = import("std:json")
-        let parsed = json.parse("\{ \"emoji\": \"\uD83D\uDE00 \uD83D\uDCA9\" \}")
-        parsed.emoji
+        let parsed = json.parse("\{ \"emoji\": \"\uD835\uDC00 \uD835\uDC35\" \}")
+        parsed.symbol
     "#;
-    assert_eq!(run_ast(input), Object::String("Happy Poop".to_string()));
+    assert_eq!(run_ast(input), Object::String("𝐀 𝐵".to_string()));
 }
 
 #[test]
