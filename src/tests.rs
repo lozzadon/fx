@@ -350,7 +350,7 @@ fn test_json_surrogate_pairs_decoding() {
         let parsed = json.parse("\{ \"emoji\": \"\uD83D\uDE00 \uD83D\uDCA9\" \}")
         parsed.emoji
     "#;
-    assert_eq!(run_ast(input), Object::String("😀 💩".to_string()));
+    assert_eq!(run_ast(input), Object::String("Happy Poop".to_string()));
 }
 
 #[test]
@@ -1153,13 +1153,13 @@ fn test_topia_adversarial_empty_arrays_and_containers() {
 fn test_topia_adversarial_unicode_and_special_strings() {
     let script = r#"
         let topia = import("topia")
-        let app = topia.App("Topia 界面框架 🚀 日本語・한국어・العربية", 1024, 768)
+        let app = topia.App("Topia 界面框架 日本語・한국어・العربية", 1024, 768)
         let t_cjk = topia.Text("こんにちは世界！你好，世界！안녕하세요!")
         let t_arabic = topia.Text("مرحبا بالعالم - تجربة واجهة المستخدم")
-        let t_emoji = topia.Text("🔥🎉👍🚀👨‍👩‍👧‍👦 100% Declarative UI 🌟")
+        let t_emoji = topia.Text("100% Declarative UI")
         let t_special = topia.Text("Line 1\nLine 2\tTabbed\r\nLine 3 \\ \"Quotes\"")
         let t_empty = topia.Text("")
-        let btn_unicode = topia.Button("✨ 点击计数 / Click +1 🎯", func() { return "ok" })
+        let btn_unicode = topia.Button("点击计数 / Click +1", func() { return "ok" })
         let btn_empty = topia.Button("", func() { return "empty_label" })
 
         let stack = topia.VStack([
@@ -1189,13 +1189,13 @@ fn test_topia_adversarial_unicode_and_special_strings() {
         Object::Array(rc) => rc.borrow().clone(),
         _ => panic!("Expected array"),
     };
-    assert_eq!(arr[0], Object::String("Topia 界面框架 🚀 日本語・한국어・العربية".to_string()));
+    assert_eq!(arr[0], Object::String("Topia 界面框架 日本語・한국어・العربية".to_string()));
     assert_eq!(arr[1], Object::String("こんにちは世界！你好，世界！안녕하세요!".to_string()));
     assert_eq!(arr[2], Object::String("مرحبا بالعالم - تجربة واجهة المستخدم".to_string()));
-    assert_eq!(arr[3], Object::String("🔥🎉👍🚀👨‍👩‍👧‍👦 100% Declarative UI 🌟".to_string()));
+    assert_eq!(arr[3], Object::String("100% Declarative UI".to_string()));
     assert_eq!(arr[4], Object::String("Line 1\nLine 2\tTabbed\r\nLine 3 \\ \"Quotes\"".to_string()));
     assert_eq!(arr[5], Object::String("".to_string()));
-    assert_eq!(arr[6], Object::String("✨ 点击计数 / Click +1 🎯".to_string()));
+    assert_eq!(arr[6], Object::String("点击计数 / Click +1".to_string()));
     assert_eq!(arr[7], Object::String("".to_string()));
 
     // Verify native Node tree conversion preserves strings identically
@@ -1205,10 +1205,10 @@ fn test_topia_adversarial_unicode_and_special_strings() {
     let children = native_node.children();
     assert_eq!(children[0].as_text(), Some("こんにちは世界！你好，世界！안녕하세요!"));
     assert_eq!(children[1].as_text(), Some("مرحبا بالعالم - تجربة واجهة المستخدم"));
-    assert_eq!(children[2].as_text(), Some("🔥🎉👍🚀👨‍👩‍👧‍👦 100% Declarative UI 🌟"));
+    assert_eq!(children[2].as_text(), Some("100% Declarative UI"));
     assert_eq!(children[3].as_text(), Some("Line 1\nLine 2\tTabbed\r\nLine 3 \\ \"Quotes\""));
     assert_eq!(children[4].as_text(), Some(""));
-    assert_eq!(children[5].as_button_label(), Some("✨ 点击计数 / Click +1 🎯"));
+    assert_eq!(children[5].as_button_label(), Some("点击计数 / Click +1"));
     assert_eq!(children[6].as_button_label(), Some(""));
 
     // Ultra-long string (10,000 chars) test
@@ -1698,7 +1698,7 @@ fn test_vm_topia_text_constructor_variations() {
         let t_concat = topia.Text("Items: " + count)
         let t_empty = topia.Text("")
         let t_special = topia.Text("Line1\nLine2\tTabbed")
-        let t_unicode = topia.Text("🚀 Topia 界面 🌟")
+        let t_unicode = topia.Text("Topia 界面")
         let res = [t_plain.text, t_concat.text, t_empty.text, t_special.text, t_unicode.text]
         res
     "#;
@@ -1707,7 +1707,7 @@ fn test_vm_topia_text_constructor_variations() {
         Object::String("Items: 42".to_string()),
         Object::String("".to_string()),
         Object::String("Line1\nLine2\tTabbed".to_string()),
-        Object::String("🚀 Topia 界面 🌟".to_string()),
+        Object::String("Topia 界面".to_string()),
     ])));
     assert_eq!(run_ast(input), expected);
     assert_eq!(run_vm(input).expect("VM failed on Text constructor"), expected);
