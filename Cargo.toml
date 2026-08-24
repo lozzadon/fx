@@ -5,4 +5,4 @@ edition = "2024"
 
 [dependencies]
 rustyline = "18.0.1"
-topia = { path = "../topia" }
+topia = { git = "https://github.com/lozzadon/topia.git", branch = "master" }
