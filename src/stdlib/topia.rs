@@ -31,6 +31,10 @@ pub fn make_module() -> Object {
     map.insert(HashKey::String("hstack".to_string()), Object::Builtin("std:topia:HStack".to_string()));
     map.insert(HashKey::String("Empty".to_string()), Object::Builtin("std:topia:Empty".to_string()));
     map.insert(HashKey::String("empty".to_string()), Object::Builtin("std:topia:Empty".to_string()));
+    map.insert(HashKey::String("Slider".to_string()), Object::Builtin("std:topia:Slider".to_string()));
+    map.insert(HashKey::String("slider".to_string()), Object::Builtin("std:topia:Slider".to_string()));
+    map.insert(HashKey::String("ScrollArea".to_string()), Object::Builtin("std:topia:ScrollArea".to_string()));
+    map.insert(HashKey::String("scroll_area".to_string()), Object::Builtin("std:topia:ScrollArea".to_string()));
     map.insert(HashKey::String("run".to_string()), Object::Builtin("std:topia:run".to_string()));
     Object::Hash(Rc::new(RefCell::new(map)))
 }
@@ -80,8 +84,8 @@ pub fn apply(name: &str, args: Vec<Object>) -> Object {
         }
 
         "Text" | "text" => {
-            if args.len() != 1 {
-                return Object::Error(format!("Text expects 1 argument (text), got {}", args.len()));
+            if args.is_empty() || args.len() > 2 {
+                return Object::Error(format!("Text expects 1 or 2 arguments (text, styling), got {}", args.len()));
             }
             let content = match &args[0] {
                 Object::String(s) => s.clone(),
@@ -91,6 +95,14 @@ pub fn apply(name: &str, args: Vec<Object>) -> Object {
             map.insert(HashKey::String("_type".to_string()), Object::String("Text".to_string()));
             map.insert(HashKey::String("__type__".to_string()), Object::String("Text".to_string()));
             map.insert(HashKey::String("text".to_string()), Object::String(content));
+            
+            if args.len() > 1 {
+                if let Object::Hash(rc) = &args[1] {
+                    for (k, v) in rc.borrow().iter() {
+                        map.insert(k.clone(), v.clone());
+                    }
+                }
+            }
             Object::Hash(Rc::new(RefCell::new(map)))
         }
 
@@ -166,6 +178,53 @@ pub fn apply(name: &str, args: Vec<Object>) -> Object {
             Object::Hash(Rc::new(RefCell::new(map)))
         }
 
+        "Slider" | "slider" => {
+            if args.len() < 3 {
+                return Object::Error(format!("Slider expects at least 3 arguments (value, min, max, optional callback), got {}", args.len()));
+            }
+            let value = match &args[0] {
+                Object::Float(f) => *f,
+                Object::Integer(i) => *i as f64,
+                _ => return Object::Error(format!("Slider value must be numeric, got {}", args[0].type_name())),
+            };
+            let min = match &args[1] {
+                Object::Float(f) => *f,
+                Object::Integer(i) => *i as f64,
+                _ => return Object::Error(format!("Slider min must be numeric, got {}", args[1].type_name())),
+            };
+            let max = match &args[2] {
+                Object::Float(f) => *f,
+                Object::Integer(i) => *i as f64,
+                _ => return Object::Error(format!("Slider max must be numeric, got {}", args[2].type_name())),
+            };
+            let mut map = HashMap::new();
+            map.insert(HashKey::String("_type".to_string()), Object::String("Slider".to_string()));
+            map.insert(HashKey::String("__type__".to_string()), Object::String("Slider".to_string()));
+            map.insert(HashKey::String("value".to_string()), Object::Float(value));
+            map.insert(HashKey::String("min".to_string()), Object::Float(min));
+            map.insert(HashKey::String("max".to_string()), Object::Float(max));
+            
+            if args.len() > 3 {
+                map.insert(HashKey::String("on_change".to_string()), args[3].clone());
+            }
+            Object::Hash(Rc::new(RefCell::new(map)))
+        }
+
+        "ScrollArea" | "scroll_area" => {
+            if args.is_empty() {
+                return Object::Error("ScrollArea expects 1 argument (children array), got 0".to_string());
+            }
+            match &args[0] {
+                Object::Array(_) => {}
+                _ => return Object::Error(format!("ScrollArea expects Array of children, got {}", args[0].type_name())),
+            };
+            let mut map = HashMap::new();
+            map.insert(HashKey::String("_type".to_string()), Object::String("ScrollArea".to_string()));
+            map.insert(HashKey::String("__type__".to_string()), Object::String("ScrollArea".to_string()));
+            map.insert(HashKey::String("children".to_string()), args[0].clone());
+            Object::Hash(Rc::new(RefCell::new(map)))
+        }
+
         "run" => {
             if args.is_empty() || args.len() > 2 {
                 return Object::Error(format!("run expects 1 or 2 arguments (app, view_builder), got {}", args.len()));
@@ -175,50 +234,42 @@ pub fn apply(name: &str, args: Vec<Object>) -> Object {
             } else {
                 (&Object::Null, args[0].clone())
             };
-
+            
             let mut title = "Topia App".to_string();
             let mut width = 800.0f32;
             let mut height = 600.0f32;
             let mut resizable = true;
-
+            
             if let Object::Hash(rc) = app_obj {
                 let map = rc.borrow();
-                if let Some(Object::String(t)) = map.get(&HashKey::String("title".to_string())) {
-                    title = t.clone();
+                if let Some(Object::String(s)) = map.get(&HashKey::String("title".to_string())) {
+                    title = s.clone();
                 }
                 if let Some(Object::Float(w)) = map.get(&HashKey::String("width".to_string())) {
                     width = *w as f32;
-                } else if let Some(Object::Integer(w)) = map.get(&HashKey::String("width".to_string())) {
-                    width = *w as f32;
                 }
                 if let Some(Object::Float(h)) = map.get(&HashKey::String("height".to_string())) {
-                    height = *h as f32;
-                } else if let Some(Object::Integer(h)) = map.get(&HashKey::String("height".to_string())) {
                     height = *h as f32;
                 }
                 if let Some(Object::Boolean(r)) = map.get(&HashKey::String("resizable".to_string())) {
                     resizable = *r;
                 }
-            } else {
-                CURRENT_APP.with(|c| {
-                    if let Some(app) = &*c.borrow() {
-                        title = app.title.clone();
-                        width = app.width;
-                        height = app.height;
-                        resizable = app.resizable;
-                    }
-                });
+            } else if *app_obj != Object::Null {
+                return Object::Error(format!("run expects App object or Null as first argument, got {}", app_obj.type_name()));
             }
-
+            
             let native_app = TopiaNativeApp::new(title, width, height).with_resizable(resizable);
-            let vb_clone = view_builder_obj;
             let res = native_app.run(move || {
+                let vb_clone = view_builder_obj.clone();
                 match &vb_clone {
                     Object::Function { .. } | Object::Builtin(_) => {
                         let eval_result = crate::evaluator::apply_function(vb_clone.clone(), vec![]);
+                        if let Object::Error(err) = &eval_result {
+                            eprintln!("[Topia Render Error]: {}", err);
+                        }
                         object_to_node(&eval_result)
                     }
-                    static_obj => object_to_node(static_obj),
+                    _ => TopiaNode::Empty,
                 }
             });
 
@@ -226,6 +277,47 @@ pub fn apply(name: &str, args: Vec<Object>) -> Object {
                 Ok(_) => Object::Null,
                 Err(err) => Object::Error(err),
             }
+        }
+
+        "TextInput" | "text_input" | "textinput" => {
+            if args.is_empty() {
+                return Object::Error("TextInput expects at least 1 argument (text), got 0".to_string());
+            }
+            let text = match &args[0] {
+                Object::String(s) => s.clone(),
+                other => format!("{}", other),
+            };
+            let mut map = HashMap::new();
+            map.insert(HashKey::String("_type".to_string()), Object::String("TextInput".to_string()));
+            map.insert(HashKey::String("__type__".to_string()), Object::String("TextInput".to_string()));
+            map.insert(HashKey::String("text".to_string()), Object::String(text));
+            if args.len() > 1 {
+                map.insert(HashKey::String("on_change".to_string()), args[1].clone());
+            }
+            Object::Hash(Rc::new(RefCell::new(map)))
+        }
+
+        "Checkbox" | "checkbox" => {
+            if args.len() < 2 {
+                return Object::Error(format!("Checkbox expects at least 2 arguments (checked, label), got {}", args.len()));
+            }
+            let checked = match &args[0] {
+                Object::Boolean(b) => *b,
+                _ => return Object::Error(format!("Checkbox 'checked' must be Boolean, got {}", args[0].type_name())),
+            };
+            let label = match &args[1] {
+                Object::String(s) => s.clone(),
+                other => format!("{}", other),
+            };
+            let mut map = HashMap::new();
+            map.insert(HashKey::String("_type".to_string()), Object::String("Checkbox".to_string()));
+            map.insert(HashKey::String("__type__".to_string()), Object::String("Checkbox".to_string()));
+            map.insert(HashKey::String("checked".to_string()), Object::Boolean(checked));
+            map.insert(HashKey::String("label".to_string()), Object::String(label));
+            if args.len() > 2 {
+                map.insert(HashKey::String("on_change".to_string()), args[2].clone());
+            }
+            Object::Hash(Rc::new(RefCell::new(map)))
         }
 
         _ => Object::Error(format!("unknown std:topia function '{}'", name)),
@@ -248,6 +340,8 @@ pub fn object_to_node(obj: &Object) -> TopiaNode {
                         "Button"
                     } else if map.contains_key(&HashKey::String("checked".to_string())) {
                         "Checkbox"
+                    } else if map.contains_key(&HashKey::String("min".to_string())) && map.contains_key(&HashKey::String("max".to_string())) {
+                        "Slider"
                     } else if map.contains_key(&HashKey::String("text".to_string())) && map.contains_key(&HashKey::String("on_change".to_string())) {
                         "TextInput"
                     } else if map.contains_key(&HashKey::String("text".to_string())) {
@@ -364,6 +458,39 @@ pub fn object_to_node(obj: &Object) -> TopiaNode {
                     } else {
                         TopiaNode::hstack(children)
                     }
+                }
+                "Slider" | "slider" => {
+                    let value = match map.get(&HashKey::String("value".to_string())) {
+                        Some(Object::Float(f)) => *f as f32,
+                        Some(Object::Integer(i)) => *i as f32,
+                        _ => 0.0,
+                    };
+                    let min = match map.get(&HashKey::String("min".to_string())) {
+                        Some(Object::Float(f)) => *f as f32,
+                        Some(Object::Integer(i)) => *i as f32,
+                        _ => 0.0,
+                    };
+                    let max = match map.get(&HashKey::String("max".to_string())) {
+                        Some(Object::Float(f)) => *f as f32,
+                        Some(Object::Integer(i)) => *i as f32,
+                        _ => 100.0,
+                    };
+                    if let Some(cb_obj) = map.get(&HashKey::String("on_change".to_string())).cloned() {
+                        TopiaNode::slider(value, min, max, move |new_val| {
+                            crate::evaluator::apply_function(cb_obj.clone(), vec![Object::Float(new_val as f64)]);
+                        })
+                    } else {
+                        TopiaNode::slider(value, min, max, |_| {})
+                    }
+                }
+                "ScrollArea" | "scroll_area" => {
+                    let children = match map.get(&HashKey::String("children".to_string())) {
+                        Some(Object::Array(arr)) => {
+                            arr.borrow().iter().map(object_to_node).collect()
+                        }
+                        _ => vec![],
+                    };
+                    TopiaNode::scroll_area(children)
                 }
                 "Empty" | "empty" => TopiaNode::Empty,
                 _ => TopiaNode::Empty,
