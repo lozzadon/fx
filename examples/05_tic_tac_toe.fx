@@ -1,4 +1,7 @@
-var ui = import("topia")
+// 05_tic_tac_toe.fx
+// A full Tic-Tac-Toe game using nested layouts and complex game logic.
+
+let ui = import("std:topia")
 
 var board = [" ", " ", " ", " ", " ", " ", " ", " ", " "]
 var current_turn = "X"
@@ -91,8 +94,8 @@ var app_builder = func() {
     }
     
     ui.VStack([
-        ui.Text("f(x) Tic-Tac-Toe"),
-        ui.Text(status_text),
+        ui.Text("Tic-Tac-Toe", {"size": 32, "bold": true}),
+        ui.Text(status_text, {"size": 20}),
         ui.VStack(rows),
         ui.Button("Reset Game", reset_game)
     ])

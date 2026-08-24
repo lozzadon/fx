@@ -1,3 +1,6 @@
+// 04_todo_app.fx
+// An interactive Task Manager demonstrating TextInputs, Checkboxes, and reactive lists.
+
 let ui = import("std:topia")
 
 struct Task {
@@ -23,7 +26,7 @@ let clear_tasks = func() {
     tasks = empty
 }
 
-let app_builder = func() {
+let render = func() {
     var task_nodes = []
     
     var i = 0
@@ -35,12 +38,7 @@ let app_builder = func() {
             tasks[idx].completed = checked
         }
         
-        let label = task.name
-        if task.completed {
-            push(task_nodes, ui.Checkbox(task.completed, label, on_toggle))
-        } else {
-            push(task_nodes, ui.Checkbox(task.completed, label, on_toggle))
-        }
+        push(task_nodes, ui.Checkbox(task.completed, task.name, on_toggle))
         i = i + 1
     }
     
@@ -53,10 +51,10 @@ let app_builder = func() {
     }
     
     ui.VStack([
-        ui.Text("f(x) Task Manager", {"size": 24, "bold": true}),
+        ui.Text("f(x) Task Manager", {"size": 28, "bold": true}),
         ui.HStack([
             ui.TextInput(new_task_name, on_input_change),
-            ui.Button("Add", add_task)
+            ui.Button("Add Task", add_task)
         ]),
         ui.HStack([
             ui.Button("Clear Tasks", clear_tasks)
@@ -66,4 +64,4 @@ let app_builder = func() {
 }
 
 let app = ui.App("Task Manager", 400, 500)
-ui.run(app, app_builder)
+ui.run(app, render)
