@@ -255,15 +255,11 @@ fn run_with_spinner(msg: &str, mut cmd: std::process::Command) -> std::process::
 }
 
 fn install_package(pkg_name: &str) {
-    println!("Installing package {} from fx-pkgs...", pkg_name);
     let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
     let repo_dir = format!("{}/.fx/fx-pkgs-repo", home);
-    let pkgs_dir = format!("{}/.fx/pkgs", home);
+    let pkgs_dir = format!("{}/fx/packages", home);
     let target_dir = format!("{}/{}", pkgs_dir, pkg_name);
 
-    if !std::path::Path::new(&format!("{}/.fx", home)).exists() {
-        fs::create_dir_all(format!("{}/.fx", home)).unwrap();
-    }
     if !std::path::Path::new(&pkgs_dir).exists() {
         fs::create_dir_all(&pkgs_dir).unwrap();
     }
@@ -294,12 +290,10 @@ fn install_package(pkg_name: &str) {
         std::process::exit(1);
     }
 
-    println!("Copying {} to ~/.fx/pkgs/{}...", pkg_name, pkg_name);
-    let _ = std::process::Command::new("cp")
-        .arg("-r")
-        .arg(&source_dir)
-        .arg(&pkgs_dir)
-        .status();
+    let msg = format!("Copying {} to ~/fx/packages/{}...", pkg_name, pkg_name);
+    let mut cmd = std::process::Command::new("cp");
+    cmd.arg("-r").arg(&source_dir).arg(&pkgs_dir);
+    let _output = run_with_spinner(&msg, cmd);
 
     println!("Successfully installed {}!", pkg_name);
 }
@@ -333,6 +327,11 @@ fn update_system() {
         } else {
             println!("fx pulled successfully.");
             
+            let cargo_bin = format!("{}/.cargo/bin/fx", home);
+            if std::path::Path::new(&cargo_bin).exists() {
+                let _ = std::fs::remove_file(&cargo_bin);
+            }
+            
             let mut build_cmd = std::process::Command::new("cargo");
             build_cmd.current_dir(&fx_dir).arg("install").arg("--path").arg(".");
             let build_output = run_with_spinner("Recompiling fx engine...", build_cmd);
@@ -341,7 +340,6 @@ fn update_system() {
                 eprintln!("Failed to recompile fx.");
             } else {
                 println!("fx updated and installed successfully!");
-
             }
         }
     } else {

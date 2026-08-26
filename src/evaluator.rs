@@ -702,7 +702,7 @@ pub fn apply_builtin(name: &str, args: Vec<Object>) -> Object {
                 if filename.starts_with("@pkg/") {
                     let pkg_name = &filename[5..];
                     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-                    actual_filename = format!("{}/.fx/pkgs/{}/index.fx", home, pkg_name);
+                    actual_filename = format!("{}/fx/packages/{}/index.fx", home, pkg_name);
                 }
 
                 match fs::read_to_string(&actual_filename) {
