@@ -36,6 +36,8 @@ fn main() {
                 eprintln!("Usage: fx --vm <file.fx>");
                 std::process::exit(1);
             }
+        } else if args[1] == "update" {
+            update_system();
         } else if args[1] == "install" {
             if args.len() < 3 {
                 eprintln!("Usage: fx install <pkg_name> (e.g. fx-math)");
@@ -271,4 +273,61 @@ fn install_package(pkg_name: &str) {
         .status();
 
     println!("Successfully installed {}!", pkg_name);
+}
+
+fn update_system() {
+    let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    
+    // Update topia
+    let topia_dir = format!("{}/topia", home);
+    if std::path::Path::new(&topia_dir).exists() {
+        println!("Updating topia...");
+        let status = std::process::Command::new("git")
+            .current_dir(&topia_dir)
+            .arg("pull")
+            .status();
+        if status.is_err() || !status.unwrap().success() {
+            eprintln!("Failed to pull topia updates.");
+        } else {
+            println!("topia updated successfully.");
+        }
+    }
+
+    // Update fx
+    let fx_dir = format!("{}/fx", home);
+    if std::path::Path::new(&fx_dir).exists() {
+        println!("Updating fx...");
+        let status = std::process::Command::new("git")
+            .current_dir(&fx_dir)
+            .arg("pull")
+            .status();
+        
+        if status.is_err() || !status.unwrap().success() {
+            eprintln!("Failed to pull fx updates.");
+        } else {
+            println!("fx pulled successfully. Recompiling...");
+            let build_status = std::process::Command::new("cargo")
+                .current_dir(&fx_dir)
+                .arg("install")
+                .arg("--path")
+                .arg(".")
+                .status();
+                
+            if build_status.is_err() || !build_status.unwrap().success() {
+                eprintln!("Failed to recompile fx.");
+            } else {
+                println!("fx updated and installed successfully!");
+                // Let's also copy it to ~/.local/bin/fx just in case their environment favors it
+                let local_bin = format!("{}/.local/bin", home);
+                if std::path::Path::new(&local_bin).exists() {
+                    let _ = std::process::Command::new("cp")
+                        .arg(format!("{}/target/release/fx", fx_dir))
+                        .arg(format!("{}/fx", local_bin))
+                        .status();
+                }
+            }
+        }
+    } else {
+        eprintln!("Error: Could not find ~/fx repository.");
+    }
 }
