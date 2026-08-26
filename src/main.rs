@@ -341,16 +341,7 @@ fn update_system() {
                 eprintln!("Failed to recompile fx.");
             } else {
                 println!("fx updated and installed successfully!");
-                // Let's also copy it to ~/.local/bin/fx just in case their environment favors it
-                let local_bin = format!("{}/.local/bin", home);
-                if std::path::Path::new(&local_bin).exists() {
-                    let target = format!("{}/fx", local_bin);
-                    let _ = std::fs::remove_file(&target);
-                    let _ = std::process::Command::new("cp")
-                        .arg(format!("{}/target/release/fx", fx_dir))
-                        .arg(target)
-                        .status();
-                }
+
             }
         }
     } else {
