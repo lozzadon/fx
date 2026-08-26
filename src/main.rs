@@ -38,6 +38,12 @@ fn main() {
             }
         } else if args[1] == "update" {
             update_system();
+        } else if args[1] == "uninstall" {
+            if args.len() < 3 {
+                eprintln!("Usage: fx uninstall <pkg_name> (e.g. fx-math)");
+                std::process::exit(1);
+            }
+            uninstall_package(&args[2]);
         } else if args[1] == "install" {
             if args.len() < 3 {
                 eprintln!("Usage: fx install <pkg_name> (e.g. fx-math)");
@@ -301,6 +307,37 @@ fn install_package(pkg_name: &str) {
 fn update_system() {
     let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
     
+    // Update fx-pkgs
+    let repo_dir = format!("{}/.fx/fx-pkgs-repo", home);
+    let pkgs_dir = format!("{}/fx/packages", home);
+    if std::path::Path::new(&repo_dir).exists() {
+        let mut cmd = std::process::Command::new("git");
+        cmd.current_dir(&repo_dir).arg("pull");
+        let output = run_with_spinner("Updating fx-pkgs repository...", cmd);
+        if !output.status.success() {
+            eprintln!("Failed to update fx-pkgs repository.");
+        } else {
+            // Re-copy any installed packages
+            if let Ok(entries) = std::fs::read_dir(&pkgs_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        if let Some(pkg_name) = path.file_name().and_then(|s| s.to_str()) {
+                            let source_dir = format!("{}/{}", repo_dir, pkg_name);
+                            if std::path::Path::new(&source_dir).exists() {
+                                let msg = format!("Updating package {}...", pkg_name);
+                                let mut cp_cmd = std::process::Command::new("cp");
+                                cp_cmd.arg("-r").arg(&source_dir).arg(&pkgs_dir);
+                                run_with_spinner(&msg, cp_cmd);
+                            }
+                        }
+                    }
+                }
+            }
+            println!("fx-pkgs updated successfully.");
+        }
+    }
+
     // Update topia
     let topia_dir = format!("{}/topia", home);
     if std::path::Path::new(&topia_dir).exists() {
@@ -345,4 +382,22 @@ fn update_system() {
     } else {
         eprintln!("Error: Could not find ~/fx repository.");
     }
+}
+
+fn uninstall_package(pkg_name: &str) {
+    let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let pkgs_dir = format!("{}/fx/packages", home);
+    let target_dir = format!("{}/{}", pkgs_dir, pkg_name);
+
+    if !std::path::Path::new(&target_dir).exists() {
+        eprintln!("Package '{}' is not installed.", pkg_name);
+        std::process::exit(1);
+    }
+    
+    let msg = format!("Uninstalling {}...", pkg_name);
+    let mut cmd = std::process::Command::new("rm");
+    cmd.arg("-rf").arg(&target_dir);
+    let _output = run_with_spinner(&msg, cmd);
+
+    println!("Successfully uninstalled {}!", pkg_name);
 }
