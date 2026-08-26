@@ -5,7 +5,8 @@ use crate::token::Token;
 #[derive(PartialEq, PartialOrd)]
 enum Precedence {
     Lowest,
-    Logical,     // &&, ||
+    LogicalOr,   // ||
+    LogicalAnd,  // &&
     Equals,      // ==, !=
     LessGreater, // <, >, <=, >=
     Range,       // .., ..=
@@ -19,7 +20,8 @@ enum Precedence {
 
 fn token_precedence(token: &Token) -> Precedence {
     match token {
-        Token::Or | Token::And => Precedence::Logical,
+        Token::Or => Precedence::LogicalOr,
+        Token::And => Precedence::LogicalAnd,
         Token::Equal | Token::NotEqual => Precedence::Equals,
         Token::LessThan | Token::GreaterThan | Token::LessEqual | Token::GreaterEqual => Precedence::LessGreater,
         Token::DotDot | Token::DotDotEqual => Precedence::Range,
@@ -230,10 +232,16 @@ impl Parser {
                 }
             }
             parameters.push((name, param_type));
+        } else {
+            self.push_error(format!("Expected identifier for parameter, got {:?}", self.cur_token));
+            return None;
         }
 
         while self.peek_token == Token::Comma {
             self.next_token(); // consume ','
+            if self.peek_token == Token::RParen {
+                break;
+            }
             self.next_token(); // move to next ident
             if let Token::Ident(name_ref) = &self.cur_token {
                 let name = name_ref.clone();
@@ -246,6 +254,9 @@ impl Parser {
                     }
                 }
                 parameters.push((name, param_type));
+            } else {
+                self.push_error(format!("Expected identifier for parameter, got {:?}", self.cur_token));
+                return None;
             }
         }
         
@@ -452,13 +463,17 @@ impl Parser {
         if self.peek_token == Token::Else {
             self.next_token(); // Move to "else"
             
-            if self.peek_token != Token::LBrace {
-                self.push_error("Expected { after else".to_string());
+            if self.peek_token == Token::If {
+                self.next_token(); // Move to "if"
+                let else_if = self.parse_if_expression()?;
+                alternative = Some(Box::new(Statement::Block(vec![Statement::Expression(else_if)])));
+            } else if self.peek_token == Token::LBrace {
+                self.next_token(); // Move to "{"
+                alternative = Some(Box::new(self.parse_block_statement()));
+            } else {
+                self.push_error("Expected { or if after else".to_string());
                 return None;
             }
-            self.next_token(); // Move to "{"
-            
-            alternative = Some(Box::new(self.parse_block_statement()));
         }
 
         Some(Expression::If {
@@ -734,6 +749,9 @@ impl Parser {
         
         while self.peek_token == Token::Comma {
             self.next_token(); // move to comma
+            if self.peek_token == Token::RParen {
+                break;
+            }
             self.next_token(); // move to next arg
             if let Some(arg) = self.parse_expression(Precedence::Lowest) {
                 args.push(arg);
@@ -763,6 +781,9 @@ impl Parser {
 
         while self.peek_token == Token::Comma {
             self.next_token(); // move to comma
+            if self.peek_token == Token::RBracket {
+                break;
+            }
             self.next_token(); // move to next element
             if let Some(el) = self.parse_expression(Precedence::Lowest) {
                 elements.push(el);
@@ -847,12 +868,22 @@ impl Parser {
         let mut has_interpolation = false;
 
         while let Some(c) = chars.next() {
-            if c == '\\' && chars.peek() == Some(&'{') {
-                chars.next();
-                current_text.push('{');
-            } else if c == '\\' && chars.peek() == Some(&'}') {
-                chars.next();
-                current_text.push('}');
+            if c == '\\' {
+                if let Some(&next_c) = chars.peek() {
+                    match next_c {
+                        'n' => { chars.next(); current_text.push('\n'); }
+                        't' => { chars.next(); current_text.push('\t'); }
+                        'r' => { chars.next(); current_text.push('\r'); }
+                        '0' => { chars.next(); current_text.push('\0'); }
+                        '"' => { chars.next(); current_text.push('"'); }
+                        '\\' => { chars.next(); current_text.push('\\'); }
+                        '{' => { chars.next(); current_text.push('{'); }
+                        '}' => { chars.next(); current_text.push('}'); }
+                        _ => { current_text.push('\\'); }
+                    }
+                } else {
+                    current_text.push('\\');
+                }
             } else if c == '{' {
                 has_interpolation = true;
                 if !current_text.is_empty() {

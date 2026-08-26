@@ -2782,9 +2782,9 @@ fn test_challenger_differential_type_annotations_runtime_enforcement() {
 #[test]
 fn test_challenger_differential_stdlib_math_json_fs_time_os_in_vm() {
     let script = r#"
-        let math = import("math")
-        let json = import("json")
-        let time = import("time")
+        let math = import("std:math")
+        let json = import("std:json")
+        let time = import("std:time")
 
         let sqrt_16 = math.sqrt(16)
         let pow_2_4 = math.pow(2, 4)

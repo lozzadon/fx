@@ -16,6 +16,8 @@ pub fn eval_program(program: Program, env: Rc<RefCell<Environment>>) -> Object {
         match result {
             Object::ReturnValue(val) => return *val,
             Object::Error(_) => return result,
+            Object::Break => return Object::Error("break statement not within a loop".to_string()),
+            Object::Continue => return Object::Error("continue statement not within a loop".to_string()),
             _ => {}
         }
     }
@@ -146,9 +148,10 @@ fn eval_statement(statement: Statement, env: Rc<RefCell<Environment>>) -> Object
 
 fn eval_block_statement(statements: Vec<Statement>, env: Rc<RefCell<Environment>>) -> Object {
     let mut result = Object::Null;
+    let block_env = Rc::new(RefCell::new(Environment::new_enclosed(env)));
 
     for statement in statements {
-        result = eval_statement(statement, Rc::clone(&env));
+        result = eval_statement(statement, Rc::clone(&block_env));
 
         if let Object::ReturnValue(_) | Object::Error(_) | Object::Break | Object::Continue = result {
             return result; 
@@ -504,17 +507,18 @@ pub fn apply_function(func: Object, args: Vec<Object>) -> Object {
     match func {
         Object::Function { parameters, return_type, body, env } => {
             let extended_env = Rc::new(RefCell::new(Environment::new_enclosed(env)));
+            if args.len() != parameters.len() {
+                return Object::Error(format!("function expects {} argument(s), got {}", parameters.len(), args.len()));
+            }
             for (i, (param_name, param_type)) in parameters.iter().enumerate() {
-                if i < args.len() {
-                    let arg = &args[i];
-                    if let Some(expected_type) = param_type {
-                        let actual_type = arg.type_name();
-                        if actual_type != *expected_type && expected_type != "Any" {
-                            return Object::Error(format!("type mismatch for parameter '{}': expected {}, got {}", param_name, expected_type, actual_type));
-                        }
+                let arg = &args[i];
+                if let Some(expected_type) = param_type {
+                    let actual_type = arg.type_name();
+                    if actual_type != *expected_type && expected_type != "Any" {
+                        return Object::Error(format!("type mismatch for parameter '{}': expected {}, got {}", param_name, expected_type, actual_type));
                     }
-                    extended_env.borrow_mut().set(param_name.clone(), arg.clone(), true);
                 }
+                extended_env.borrow_mut().set(param_name.clone(), arg.clone(), true);
             }
             
             let evaluated = eval_statement(body, extended_env);
@@ -694,11 +698,14 @@ pub fn apply_builtin(name: &str, args: Vec<Object>) -> Object {
                     }
                 }
 
-                if let Some(module) = crate::stdlib::load_std_module(filename) {
-                    return module;
+                let mut actual_filename = filename.clone();
+                if filename.starts_with("@pkg/") {
+                    let pkg_name = &filename[5..];
+                    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+                    actual_filename = format!("{}/.fx/pkgs/{}/index.fx", home, pkg_name);
                 }
 
-                match fs::read_to_string(filename) {
+                match fs::read_to_string(&actual_filename) {
                     Ok(contents) => {
                         let lexer = Lexer::new(&contents);
                         let mut parser = Parser::new(lexer);
@@ -943,21 +950,36 @@ fn eval_float_infix_expression(operator: &str, left: f64, right: f64) -> Object 
 
 fn eval_integer_infix_expression(operator: &str, left: i64, right: i64) -> Object {
     match operator {
-        "+" => Object::Integer(left + right),
-        "-" => Object::Integer(left - right),
-        "*" => Object::Integer(left * right),
+        "+" => match left.checked_add(right) {
+            Some(val) => Object::Integer(val),
+            None => Object::Error("integer overflow".to_string()),
+        },
+        "-" => match left.checked_sub(right) {
+            Some(val) => Object::Integer(val),
+            None => Object::Error("integer overflow".to_string()),
+        },
+        "*" => match left.checked_mul(right) {
+            Some(val) => Object::Integer(val),
+            None => Object::Error("integer overflow".to_string()),
+        },
         "/" => {
             if right == 0 {
                 Object::Error("division by zero".to_string())
             } else {
-                Object::Integer(left / right)
+                match left.checked_div(right) {
+                    Some(val) => Object::Integer(val),
+                    None => Object::Error("integer overflow".to_string()),
+                }
             }
         }
         "%" => {
             if right == 0 {
                 Object::Error("division by zero".to_string())
             } else {
-                Object::Integer(left % right)
+                match left.checked_rem(right) {
+                    Some(val) => Object::Integer(val),
+                    None => Object::Error("integer overflow".to_string()),
+                }
             }
         }
         "<" => Object::Boolean(left < right),

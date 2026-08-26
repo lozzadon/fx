@@ -9,6 +9,8 @@ pub struct Bytecode {
     pub instructions: Instructions,
     pub constants: Vec<Object>,
     pub symbol_names: Vec<String>,
+    pub symbol_mutability: Vec<bool>,
+    pub symbol_is_global: Vec<bool>,
     pub env: Rc<RefCell<Environment>>,
 }
 
@@ -28,42 +30,89 @@ pub struct Symbol {
     pub is_mutable: bool,
 }
 
-pub struct SymbolTable {
-    pub store: HashMap<String, Symbol>,
+pub struct GlobalSymbolState {
     pub num_definitions: usize,
     pub symbol_names: Vec<String>,
+    pub symbol_mutability: Vec<bool>,
+    pub symbol_is_global: Vec<bool>,
+}
+
+pub struct SymbolTable {
+    pub store: HashMap<String, Symbol>,
+    pub outer: Option<Box<SymbolTable>>,
+    pub global_state: Rc<RefCell<GlobalSymbolState>>,
+    pub depth: usize,
 }
 
 impl SymbolTable {
     pub fn new() -> SymbolTable {
         SymbolTable {
             store: HashMap::new(),
-            num_definitions: 0,
-            symbol_names: Vec::new(),
+            outer: None,
+            global_state: Rc::new(RefCell::new(GlobalSymbolState {
+                num_definitions: 0,
+                symbol_names: Vec::new(),
+                symbol_mutability: Vec::new(),
+                symbol_is_global: Vec::new(),
+            })),
+            depth: 0,
+        }
+    }
+
+    pub fn enter_scope(&mut self) {
+        let current_store = std::mem::take(&mut self.store);
+        let current_outer = self.outer.take();
+        let old_self = SymbolTable {
+            store: current_store,
+            outer: current_outer,
+            global_state: Rc::clone(&self.global_state),
+            depth: self.depth,
+        };
+        self.outer = Some(Box::new(old_self));
+        self.depth += 1;
+    }
+
+    pub fn leave_scope(&mut self) {
+        if let Some(outer) = self.outer.take() {
+            self.store = outer.store;
+            self.depth = outer.depth;
+            self.outer = outer.outer;
         }
     }
     
     pub fn define(&mut self, name: String, is_mutable: bool) -> usize {
         if let Some(sym) = self.store.get_mut(&name) {
             sym.is_mutable = is_mutable;
+            let mut state = self.global_state.borrow_mut();
+            state.symbol_mutability[sym.index] = is_mutable;
             sym.index
         } else {
-            let index = self.num_definitions;
+            let mut state = self.global_state.borrow_mut();
+            let index = state.num_definitions;
             self.store.insert(name.clone(), Symbol { index, is_mutable });
-            self.symbol_names.push(name);
-            self.num_definitions += 1;
+            state.symbol_names.push(name);
+            state.symbol_mutability.push(is_mutable);
+            state.symbol_is_global.push(self.depth == 0);
+            state.num_definitions += 1;
             index
         }
     }
     
-    pub fn resolve(&self, name: &str) -> Option<&Symbol> {
-        self.store.get(name)
+    pub fn resolve(&self, name: &str) -> Option<Symbol> {
+        if let Some(sym) = self.store.get(name) {
+            Some(sym.clone())
+        } else if let Some(outer) = &self.outer {
+            outer.resolve(name)
+        } else {
+            None
+        }
     }
 }
 
 pub struct LoopContext {
     pub loop_start: usize,
     pub break_positions: Vec<usize>,
+    pub requires_iterator_pop: bool,
 }
 
 pub struct Compiler {
@@ -139,13 +188,21 @@ impl Compiler {
                 self.emit(Opcode::OpSetGlobal, &[symbol_index]);
             }
             Statement::Block(statements) => {
+                self.symbol_table.enter_scope();
                 for stmt in statements {
-                    self.compile_statement(stmt)?;
+                    if let Err(e) = self.compile_statement(stmt) {
+                        self.symbol_table.leave_scope();
+                        return Err(e);
+                    }
                 }
+                self.symbol_table.leave_scope();
             }
             Statement::Break => {
                 if self.loop_stack.is_empty() {
                     return Err("break statement not within a loop".to_string());
+                }
+                if self.loop_stack.last().unwrap().requires_iterator_pop {
+                    self.emit(Opcode::OpPop, &[]);
                 }
                 let pos = self.emit(Opcode::OpJump, &[0xFFFF]);
                 if let Some(ctx) = self.loop_stack.last_mut() {
@@ -167,22 +224,34 @@ impl Compiler {
     fn compile_block_expression(&mut self, stmt: &Statement) -> Result<(), String> {
         match stmt {
             Statement::Block(statements) => {
+                self.symbol_table.enter_scope();
                 if statements.is_empty() {
                     self.emit(Opcode::OpNull, &[]);
+                    self.symbol_table.leave_scope();
                     return Ok(());
                 }
                 for (i, s) in statements.iter().enumerate() {
                     if i == statements.len() - 1 {
                         if let Statement::Expression(expr) = s {
-                            self.compile_expression(expr)?;
+                            if let Err(e) = self.compile_expression(expr) {
+                                self.symbol_table.leave_scope();
+                                return Err(e);
+                            }
                         } else {
-                            self.compile_statement(s)?;
+                            if let Err(e) = self.compile_statement(s) {
+                                self.symbol_table.leave_scope();
+                                return Err(e);
+                            }
                             self.emit(Opcode::OpNull, &[]);
                         }
                     } else {
-                        self.compile_statement(s)?;
+                        if let Err(e) = self.compile_statement(s) {
+                            self.symbol_table.leave_scope();
+                            return Err(e);
+                        }
                     }
                 }
+                self.symbol_table.leave_scope();
             }
             Statement::Expression(expr) => {
                 self.compile_expression(expr)?;
@@ -223,10 +292,10 @@ impl Compiler {
                 self.emit(Opcode::OpNull, &[]);
             }
             Expression::Identifier(name) => {
-                if let Some(builtin_idx) = lookup_builtin(name) {
-                    self.emit(Opcode::OpGetBuiltin, &[builtin_idx]);
-                } else if let Some(symbol) = self.symbol_table.resolve(name) {
+                if let Some(symbol) = self.symbol_table.resolve(name) {
                     self.emit(Opcode::OpGetGlobal, &[symbol.index]);
+                } else if let Some(builtin_idx) = lookup_builtin(name) {
+                    self.emit(Opcode::OpGetBuiltin, &[builtin_idx]);
                 } else {
                     return Err(format!("undefined variable {}", name));
                 }
@@ -341,6 +410,7 @@ impl Compiler {
                 self.loop_stack.push(LoopContext {
                     loop_start,
                     break_positions: Vec::new(),
+                    requires_iterator_pop: false,
                 });
                 
                 self.compile_statement(body)?;
@@ -360,16 +430,22 @@ impl Compiler {
                 self.emit(Opcode::OpIterInit, &[]);
                 let loop_start = self.instructions.len();
                 let iter_next_pos = self.emit(Opcode::OpIterNext, &[0xFFFF]);
-                let prev_symbol = self.symbol_table.resolve(variable).cloned();
+                
+                self.symbol_table.enter_scope();
                 let symbol_index = self.symbol_table.define(variable.clone(), false);
                 self.emit(Opcode::OpSetGlobal, &[symbol_index]);
                 
                 self.loop_stack.push(LoopContext {
                     loop_start,
                     break_positions: Vec::new(),
+                    requires_iterator_pop: true,
                 });
                 
-                self.compile_statement(body)?;
+                if let Err(e) = self.compile_statement(body) {
+                    self.symbol_table.leave_scope();
+                    return Err(e);
+                }
+                
                 self.emit(Opcode::OpJump, &[loop_start]);
                 let after_loop = self.instructions.len();
                 self.change_operand(iter_next_pos, after_loop);
@@ -380,13 +456,7 @@ impl Compiler {
                 }
                 
                 self.emit(Opcode::OpNull, &[]);
-                if let Some(prev) = prev_symbol {
-                    if let Some(sym) = self.symbol_table.store.get_mut(variable) {
-                        sym.is_mutable = prev.is_mutable;
-                    }
-                } else {
-                    self.symbol_table.store.remove(variable);
-                }
+                self.symbol_table.leave_scope();
             }
             Expression::FunctionLiteral { parameters, return_type, body, .. } => {
                 let func_obj = Object::Function {
@@ -398,7 +468,71 @@ impl Compiler {
                 let const_idx = self.add_constant(func_obj);
                 self.emit(Opcode::OpConstant, &[const_idx]);
             }
-            _ => return Err(format!("Unsupported expression in VM compilation: {:?}", e)),
+            Expression::Match { value, cases } => {
+                self.compile_expression(value)?;
+                let mut end_jumps = Vec::new();
+
+                for (pattern, body) in cases {
+                    let is_catch_all = if let Expression::Identifier(name) = &pattern { name == "_" } else { false };
+                    
+                    if is_catch_all {
+                        self.emit(Opcode::OpPop, &[]);
+                        self.compile_block_expression(body)?;
+                        let jmp = self.emit(Opcode::OpJump, &[0xFFFF]);
+                        end_jumps.push(jmp);
+                        break;
+                    }
+
+                    self.emit(Opcode::OpDup, &[]);
+                    self.compile_expression(pattern)?;
+                    self.emit(Opcode::OpEqual, &[]);
+                    
+                    let jump_not_match = self.emit(Opcode::OpJumpNotTruthy, &[0xFFFF]);
+                    
+                    self.emit(Opcode::OpPop, &[]); // Pop the value on match
+                    self.compile_block_expression(body)?;
+                    let jmp_end = self.emit(Opcode::OpJump, &[0xFFFF]);
+                    end_jumps.push(jmp_end);
+                    
+                    let next_case_pos = self.instructions.len();
+                    self.change_operand(jump_not_match, next_case_pos);
+                }
+
+                self.emit(Opcode::OpPop, &[]); // Pop the value if no match
+                self.emit(Opcode::OpNull, &[]);
+                let default_end = self.emit(Opcode::OpJump, &[0xFFFF]);
+                end_jumps.push(default_end);
+
+                let end_pos = self.instructions.len();
+                for jmp in end_jumps {
+                    self.change_operand(jmp, end_pos);
+                }
+            }
+            Expression::TryCatch { try_body, catch_param, catch_body } => {
+                let try_jump = self.emit(Opcode::OpTry, &[0xFFFF]);
+                
+                self.compile_block_expression(try_body)?;
+                self.emit(Opcode::OpCatchEnd, &[]);
+                let end_jump = self.emit(Opcode::OpJump, &[0xFFFF]);
+                
+                let catch_pos = self.instructions.len();
+                self.change_operand(try_jump, catch_pos);
+                
+                self.symbol_table.enter_scope();
+                let catch_param_idx = self.symbol_table.define(catch_param.clone(), false);
+                self.emit(Opcode::OpSetGlobal, &[catch_param_idx]);
+                
+                self.compile_block_expression(catch_body)?;
+                
+                self.symbol_table.leave_scope();
+                
+                let end_pos = self.instructions.len();
+                self.change_operand(end_jump, end_pos);
+            }
+            Expression::Throw(exp) => {
+                self.compile_expression(exp)?;
+                self.emit(Opcode::OpThrow, &[]);
+            }
         }
         Ok(())
     }
@@ -421,10 +555,13 @@ impl Compiler {
     }
 
     pub fn bytecode(self) -> Bytecode {
+        let global_state = self.symbol_table.global_state.borrow();
         Bytecode {
             instructions: self.instructions,
             constants: self.constants,
-            symbol_names: self.symbol_table.symbol_names,
+            symbol_names: global_state.symbol_names.clone(),
+            symbol_mutability: global_state.symbol_mutability.clone(),
+            symbol_is_global: global_state.symbol_is_global.clone(),
             env: self.env,
         }
     }

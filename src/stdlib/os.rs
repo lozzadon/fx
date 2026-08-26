@@ -17,6 +17,7 @@ pub fn make_module() -> Object {
     map.insert(HashKey::String("exit".to_string()), Object::Builtin("std:os:exit".to_string()));
     map.insert(HashKey::String("platform".to_string()), Object::Builtin("std:os:platform".to_string()));
     map.insert(HashKey::String("getpid".to_string()), Object::Builtin("std:os:getpid".to_string()));
+    map.insert(HashKey::String("spawn".to_string()), Object::Builtin("std:os:spawn".to_string()));
     Object::Hash(Rc::new(RefCell::new(map)))
 }
 
@@ -94,6 +95,35 @@ pub fn apply(name: &str, args: Vec<Object>) -> Object {
         }
         "getpid" => {
             Object::Integer(std::process::id() as i64)
+        }
+        "spawn" => {
+            if args.is_empty() {
+                return Object::Error("spawn expects at least 1 argument (command)".to_string());
+            }
+            if let Object::String(cmd) = &args[0] {
+                let mut command = std::process::Command::new(cmd);
+                if args.len() > 1 {
+                    if let Object::Array(arr) = &args[1] {
+                        for a in arr.borrow().iter() {
+                            if let Object::String(s) = a {
+                                command.arg(s);
+                            }
+                        }
+                    } else {
+                        for arg in args.iter().skip(1) {
+                            if let Object::String(s) = arg {
+                                command.arg(s);
+                            }
+                        }
+                    }
+                }
+                match command.spawn() {
+                    Ok(_) => Object::Boolean(true),
+                    Err(e) => Object::Error(format!("failed to spawn '{}': {}", cmd, e)),
+                }
+            } else {
+                Object::Error("spawn expects command to be a string".to_string())
+            }
         }
         _ => Object::Error(format!("unknown std:os function '{}'", name)),
     }

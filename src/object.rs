@@ -132,9 +132,7 @@ impl PartialEq for Object {
                 let _guard = EqPointerGuard(pair);
                 *f1.borrow() == *f2.borrow()
             }
-            (Object::Function { parameters: p1, return_type: r1, body: b1, .. }, Object::Function { parameters: p2, return_type: r2, body: b2, .. }) => {
-                p1 == p2 && r1 == r2 && b1 == b2
-            }
+            (Object::Function { .. }, Object::Function { .. }) => false,
             _ => false,
         }
     }

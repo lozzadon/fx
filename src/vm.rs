@@ -22,8 +22,11 @@ pub struct VM {
     sp: usize, // Stack pointer
     pub globals: Vec<Object>,
     pub symbol_names: Vec<String>,
+    pub symbol_mutability: Vec<bool>,
+    pub symbol_is_global: Vec<bool>,
     pub env: Rc<RefCell<Environment>>,
     pub last_popped: Option<Object>,
+    pub catch_stack: Vec<(usize, usize)>,
 }
 
 impl VM {
@@ -35,8 +38,11 @@ impl VM {
             sp: 0,
             globals: vec![Object::Null; 65536],
             symbol_names: bytecode.symbol_names,
+            symbol_mutability: bytecode.symbol_mutability,
+            symbol_is_global: bytecode.symbol_is_global,
             env: bytecode.env,
             last_popped: None,
+            catch_stack: Vec::new(),
         }
     }
 
@@ -44,13 +50,28 @@ impl VM {
         self.last_popped.as_ref()
     }
 
-    pub fn run(&mut self) -> Result<(), String> {
+        pub fn run(&mut self) -> Result<(), String> {
         let mut ip = 0;
         
         while ip < self.instructions.len() {
-            let op = Opcode::from(self.instructions[ip]);
-            
-            match op {
+            if let Err(err) = self.step(&mut ip) {
+                if let Some((catch_ip, catch_sp)) = self.catch_stack.pop() {
+                    self.sp = catch_sp;
+                    self.push(Object::String(err))?;
+                    ip = catch_ip;
+                } else {
+                    return Err(err);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn step(&mut self, ip_ptr: &mut usize) -> Result<(), String> {
+        let mut ip = *ip_ptr;
+        let op = Opcode::from(self.instructions[ip]);
+        
+        match op {
                 Opcode::OpConstant => {
                     let const_index = ((self.instructions[ip + 1] as usize) << 8) | (self.instructions[ip + 2] as usize);
                     ip += 2;
@@ -221,14 +242,17 @@ impl VM {
                     let val = self.pop()?;
                     self.globals[global_index] = val.clone();
                     if global_index < self.symbol_names.len() {
-                        let name = self.symbol_names[global_index].clone();
-                        self.env.borrow_mut().set(name, val, true);
+                        if self.symbol_is_global[global_index] {
+                            let name = self.symbol_names[global_index].clone();
+                            let is_mut = *self.symbol_mutability.get(global_index).unwrap_or(&true);
+                            self.env.borrow_mut().set(name, val, is_mut);
+                        }
                     }
                 }
                 Opcode::OpGetGlobal => {
                     let global_index = ((self.instructions[ip + 1] as usize) << 8) | (self.instructions[ip + 2] as usize);
                     ip += 2;
-                    let val = if global_index < self.symbol_names.len() {
+                    let val = if global_index < self.symbol_names.len() && self.symbol_is_global[global_index] {
                         let name = &self.symbol_names[global_index];
                         if let Some(v) = self.env.borrow().get(name) {
                             self.globals[global_index] = v.clone();
@@ -244,14 +268,14 @@ impl VM {
                 Opcode::OpJump => {
                     let target = ((self.instructions[ip + 1] as usize) << 8) | (self.instructions[ip + 2] as usize);
                     ip = target;
-                    continue;
+                    *ip_ptr = ip; return Ok(());
                 }
                 Opcode::OpJumpNotTruthy => {
                     let target = ((self.instructions[ip + 1] as usize) << 8) | (self.instructions[ip + 2] as usize);
                     let condition = self.pop()?;
                     if !is_truthy(&condition) {
                         ip = target;
-                        continue;
+                        *ip_ptr = ip; return Ok(());
                     } else {
                         ip += 2;
                     }
@@ -276,6 +300,22 @@ impl VM {
                         elements[i] = self.pop()?;
                     }
                     self.push(Object::Array(Rc::new(RefCell::new(elements))))?;
+                }
+                Opcode::OpDup => {
+                    let val = self.stack[self.sp - 1].clone();
+                    self.push(val)?;
+                }
+                Opcode::OpTry => {
+                    let target = ((self.instructions[ip + 1] as usize) << 8) | (self.instructions[ip + 2] as usize);
+                    ip += 2;
+                    self.catch_stack.push((target, self.sp));
+                }
+                Opcode::OpCatchEnd => {
+                    self.catch_stack.pop();
+                }
+                Opcode::OpThrow => {
+                    let val = self.pop()?;
+                    return Err(format!("{}", val));
                 }
                 Opcode::OpHash => {
                     let num_elements = ((self.instructions[ip + 1] as usize) << 8) | (self.instructions[ip + 2] as usize);
@@ -443,7 +483,7 @@ impl VM {
                                         None => {
                                             self.pop()?;
                                             ip = jump_target;
-                                            continue;
+                                            *ip_ptr = ip; return Ok(());
                                         }
                                     };
                                     let has_next = if *inclusive { curr_val <= *end } else { curr_val < *end };
@@ -456,7 +496,7 @@ impl VM {
                                     } else {
                                         self.pop()?; // pop iterator
                                         ip = jump_target;
-                                        continue;
+                                        *ip_ptr = ip; return Ok(());
                                     }
                                 }
                                 Object::Array(rc) => {
@@ -471,7 +511,7 @@ impl VM {
                                     } else {
                                         self.pop()?; // pop iterator
                                         ip = jump_target;
-                                        continue;
+                                        *ip_ptr = ip; return Ok(());
                                     }
                                 }
                                 _ => return Err("Invalid iterator target".to_string()),
@@ -482,11 +522,12 @@ impl VM {
                 }
             }
             
-            ip += 1;
-        }
+            
+        *ip_ptr = ip + 1;
         Ok(())
     }
 
+    
     fn push(&mut self, obj: Object) -> Result<(), String> {
         if self.sp >= STACK_SIZE {
             return Err("Stack overflow".to_string());

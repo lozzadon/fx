@@ -101,6 +101,8 @@ pub fn make_module() -> Object {
     map.insert(HashKey::String("remove_file_or_throw".to_string()), Object::Builtin("std:fs:remove_file_or_throw".to_string()));
     map.insert(HashKey::String("create_dir".to_string()), Object::Builtin("std:fs:create_dir".to_string()));
     map.insert(HashKey::String("create_dir_or_throw".to_string()), Object::Builtin("std:fs:create_dir_or_throw".to_string()));
+    map.insert(HashKey::String("read_dir".to_string()), Object::Builtin("std:fs:read_dir".to_string()));
+    map.insert(HashKey::String("read_dir_or_throw".to_string()), Object::Builtin("std:fs:read_dir_or_throw".to_string()));
     Object::Hash(Rc::new(RefCell::new(map)))
 }
 
@@ -320,6 +322,56 @@ pub fn apply(name: &str, args: Vec<Object>) -> Object {
                     }
                 }
                 _ => Object::Error("create_dir_or_throw expects string path".to_string()),
+            }
+        }
+        "read_dir" => {
+            if args.len() != 1 {
+                return make_err(&format!("read_dir expects 1 argument, got {}", args.len()));
+            }
+            match &args[0] {
+                Object::String(path) => {
+                    if let Err(e) = validate_path(path) {
+                        return make_err(&e);
+                    }
+                    match fs::read_dir(path) {
+                        Ok(entries) => {
+                            let mut arr = Vec::new();
+                            for entry in entries.flatten() {
+                                if let Ok(name) = entry.file_name().into_string() {
+                                    arr.push(Object::String(name));
+                                }
+                            }
+                            make_ok(Object::Array(Rc::new(RefCell::new(arr))))
+                        }
+                        Err(e) => make_err(&e.to_string()),
+                    }
+                }
+                _ => make_err("read_dir expects string path"),
+            }
+        }
+        "read_dir_or_throw" => {
+            if args.len() != 1 {
+                return Object::Error(format!("read_dir_or_throw expects 1 argument, got {}", args.len()));
+            }
+            match &args[0] {
+                Object::String(path) => {
+                    if let Err(e) = validate_path(path) {
+                        return Object::Error(e);
+                    }
+                    match fs::read_dir(path) {
+                        Ok(entries) => {
+                            let mut arr = Vec::new();
+                            for entry in entries.flatten() {
+                                if let Ok(name) = entry.file_name().into_string() {
+                                    arr.push(Object::String(name));
+                                }
+                            }
+                            Object::Array(Rc::new(RefCell::new(arr)))
+                        }
+                        Err(e) => Object::Error(e.to_string()),
+                    }
+                }
+                _ => Object::Error("read_dir_or_throw expects string path".to_string()),
             }
         }
         _ => make_err(&format!("unknown std:fs function '{}'", name)),

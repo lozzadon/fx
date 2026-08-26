@@ -36,7 +36,12 @@ fn main() {
                 eprintln!("Usage: fx --vm <file.fx>");
                 std::process::exit(1);
             }
-            run_file_vm(&args[2]);
+        } else if args[1] == "install" {
+            if args.len() < 3 {
+                eprintln!("Usage: fx install <pkg_name> (e.g. fx-math)");
+                std::process::exit(1);
+            }
+            install_package(&args[2]);
         } else {
             // Run a file
             let filename = &args[1];
@@ -213,4 +218,57 @@ fn start_repl() {
     if let Err(err) = rl.save_history(&history_path) {
         println!("Failed to save history: {}", err);
     }
+}
+
+fn install_package(pkg_name: &str) {
+    println!("Installing package {} from fx-pkgs...", pkg_name);
+    let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let repo_dir = format!("{}/.fx/fx-pkgs-repo", home);
+    let pkgs_dir = format!("{}/.fx/pkgs", home);
+    let target_dir = format!("{}/{}", pkgs_dir, pkg_name);
+
+    if !std::path::Path::new(&format!("{}/.fx", home)).exists() {
+        fs::create_dir_all(format!("{}/.fx", home)).unwrap();
+    }
+    if !std::path::Path::new(&pkgs_dir).exists() {
+        fs::create_dir_all(&pkgs_dir).unwrap();
+    }
+
+    if !std::path::Path::new(&repo_dir).exists() {
+        println!("Initializing local package cache...");
+        let status = std::process::Command::new("git")
+            .arg("clone")
+            .arg("https://github.com/lozzadon/fx-pkgs.git")
+            .arg(&repo_dir)
+            .status();
+        if status.is_err() || !status.unwrap().success() {
+            eprintln!("Failed to clone fx-pkgs repository.");
+            std::process::exit(1);
+        }
+    } else {
+        println!("Updating local package cache...");
+        let status = std::process::Command::new("git")
+            .current_dir(&repo_dir)
+            .arg("pull")
+            .status();
+        if status.is_err() || !status.unwrap().success() {
+            eprintln!("Failed to update fx-pkgs repository.");
+            std::process::exit(1);
+        }
+    }
+
+    let source_dir = format!("{}/{}", repo_dir, pkg_name);
+    if !std::path::Path::new(&source_dir).exists() {
+        eprintln!("Package '{}' not found in fx-pkgs repository.", pkg_name);
+        std::process::exit(1);
+    }
+
+    println!("Copying {} to ~/.fx/pkgs/{}...", pkg_name, pkg_name);
+    let _ = std::process::Command::new("cp")
+        .arg("-r")
+        .arg(&source_dir)
+        .arg(&pkgs_dir)
+        .status();
+
+    println!("Successfully installed {}!", pkg_name);
 }

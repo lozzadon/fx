@@ -4,10 +4,6 @@ use std::cell::RefCell;
 use crate::object::{HashKey, Object};
 use topia::{App as TopiaNativeApp, Node as TopiaNode};
 
-thread_local! {
-    static CURRENT_APP: RefCell<Option<TopiaNativeApp>> = RefCell::new(None);
-}
-
 /// Constructs the `topia` standard library module hash.
 pub fn make_module() -> Object {
     let mut map = HashMap::new();
@@ -30,11 +26,15 @@ pub fn make_module() -> Object {
     map.insert(HashKey::String("HStack".to_string()), Object::Builtin("std:topia:HStack".to_string()));
     map.insert(HashKey::String("hstack".to_string()), Object::Builtin("std:topia:HStack".to_string()));
     map.insert(HashKey::String("Empty".to_string()), Object::Builtin("std:topia:Empty".to_string()));
+    map.insert(HashKey::String("Center".to_string()), Object::Builtin("std:topia:Center".to_string()));
+    map.insert(HashKey::String("center".to_string()), Object::Builtin("std:topia:Center".to_string()));
     map.insert(HashKey::String("empty".to_string()), Object::Builtin("std:topia:Empty".to_string()));
     map.insert(HashKey::String("Slider".to_string()), Object::Builtin("std:topia:Slider".to_string()));
     map.insert(HashKey::String("slider".to_string()), Object::Builtin("std:topia:Slider".to_string()));
     map.insert(HashKey::String("ScrollArea".to_string()), Object::Builtin("std:topia:ScrollArea".to_string()));
     map.insert(HashKey::String("scroll_area".to_string()), Object::Builtin("std:topia:ScrollArea".to_string()));
+    map.insert(HashKey::String("Graph".to_string()), Object::Builtin("std:topia:Graph".to_string()));
+    map.insert(HashKey::String("graph".to_string()), Object::Builtin("std:topia:Graph".to_string()));
     map.insert(HashKey::String("run".to_string()), Object::Builtin("std:topia:run".to_string()));
     Object::Hash(Rc::new(RefCell::new(map)))
 }
@@ -69,9 +69,6 @@ pub fn apply(name: &str, args: Vec<Object>) -> Object {
                 true
             };
 
-            let app_instance = TopiaNativeApp::new(&title, width as f32, height as f32).with_resizable(resizable);
-            CURRENT_APP.with(|c| *c.borrow_mut() = Some(app_instance));
-
             let mut map = HashMap::new();
             map.insert(HashKey::String("_type".to_string()), Object::String("App".to_string()));
             map.insert(HashKey::String("__type__".to_string()), Object::String("App".to_string()));
@@ -79,6 +76,7 @@ pub fn apply(name: &str, args: Vec<Object>) -> Object {
             map.insert(HashKey::String("width".to_string()), Object::Float(width));
             map.insert(HashKey::String("height".to_string()), Object::Float(height));
             map.insert(HashKey::String("resizable".to_string()), Object::Boolean(resizable));
+            map.insert(HashKey::String("scale".to_string()), Object::Float(1.0));
             map.insert(HashKey::String("run".to_string()), Object::Builtin("std:topia:run".to_string()));
             Object::Hash(Rc::new(RefCell::new(map)))
         }
@@ -101,6 +99,8 @@ pub fn apply(name: &str, args: Vec<Object>) -> Object {
                     for (k, v) in rc.borrow().iter() {
                         map.insert(k.clone(), v.clone());
                     }
+                } else {
+                    return Object::Error(format!("Second argument to Text must be a Hash, got {}", args[1]));
                 }
             }
             Object::Hash(Rc::new(RefCell::new(map)))
@@ -171,6 +171,18 @@ pub fn apply(name: &str, args: Vec<Object>) -> Object {
             Object::Hash(Rc::new(RefCell::new(map)))
         }
 
+
+        "Center" | "center" => {
+            if args.is_empty() {
+                return Object::Error("Center expects 1 argument (child), got 0".to_string());
+            }
+            let mut map = HashMap::new();
+            map.insert(HashKey::String("_type".to_string()), Object::String("Center".to_string()));
+            map.insert(HashKey::String("__type__".to_string()), Object::String("Center".to_string()));
+            map.insert(HashKey::String("child".to_string()), args[0].clone());
+            Object::Hash(Rc::new(RefCell::new(map)))
+        }
+
         "Empty" | "empty" => {
             let mut map = HashMap::new();
             map.insert(HashKey::String("_type".to_string()), Object::String("Empty".to_string()));
@@ -225,6 +237,21 @@ pub fn apply(name: &str, args: Vec<Object>) -> Object {
             Object::Hash(Rc::new(RefCell::new(map)))
         }
 
+        "Graph" | "graph" => {
+            if args.len() != 5 {
+                return Object::Error(format!("Graph expects 5 arguments (points, min_x, max_x, min_y, max_y), got {}", args.len()));
+            }
+            let mut map = HashMap::new();
+            map.insert(HashKey::String("_type".to_string()), Object::String("Graph".to_string()));
+            map.insert(HashKey::String("__type__".to_string()), Object::String("Graph".to_string()));
+            map.insert(HashKey::String("points".to_string()), args[0].clone());
+            map.insert(HashKey::String("min_x".to_string()), args[1].clone());
+            map.insert(HashKey::String("max_x".to_string()), args[2].clone());
+            map.insert(HashKey::String("min_y".to_string()), args[3].clone());
+            map.insert(HashKey::String("max_y".to_string()), args[4].clone());
+            Object::Hash(Rc::new(RefCell::new(map)))
+        }
+
         "run" => {
             if args.is_empty() || args.len() > 2 {
                 return Object::Error(format!("run expects 1 or 2 arguments (app, view_builder), got {}", args.len()));
@@ -239,6 +266,7 @@ pub fn apply(name: &str, args: Vec<Object>) -> Object {
             let mut width = 800.0f32;
             let mut height = 600.0f32;
             let mut resizable = true;
+            let mut scale = 1.0f32;
             
             if let Object::Hash(rc) = app_obj {
                 let map = rc.borrow();
@@ -254,11 +282,23 @@ pub fn apply(name: &str, args: Vec<Object>) -> Object {
                 if let Some(Object::Boolean(r)) = map.get(&HashKey::String("resizable".to_string())) {
                     resizable = *r;
                 }
+                if let Some(Object::Float(s)) = map.get(&HashKey::String("scale".to_string())) {
+                    scale = *s as f32;
+                }
             } else if *app_obj != Object::Null {
                 return Object::Error(format!("run expects App object or Null as first argument, got {}", app_obj.type_name()));
             }
             
-            let native_app = TopiaNativeApp::new(title, width, height).with_resizable(resizable);
+            let native_app = TopiaNativeApp::new(title, width, height)
+                .with_resizable(resizable)
+                .with_scale(scale);
+            let mut is_verbose = false;
+            for arg in std::env::args() {
+                if arg == "--verbose" {
+                    is_verbose = true;
+                }
+            }
+            
             let res = native_app.run(move || {
                 let vb_clone = view_builder_obj.clone();
                 match &vb_clone {
@@ -266,6 +306,9 @@ pub fn apply(name: &str, args: Vec<Object>) -> Object {
                         let eval_result = crate::evaluator::apply_function(vb_clone.clone(), vec![]);
                         if let Object::Error(err) = &eval_result {
                             eprintln!("[Topia Render Error]: {}", err);
+                        }
+                        if is_verbose {
+                            println!("[Topia Verbose] UI Tree:\n{}", eval_result);
                         }
                         object_to_node(&eval_result)
                     }
@@ -344,6 +387,8 @@ pub fn object_to_node(obj: &Object) -> TopiaNode {
                         "Slider"
                     } else if map.contains_key(&HashKey::String("text".to_string())) && map.contains_key(&HashKey::String("on_change".to_string())) {
                         "TextInput"
+                    } else if map.contains_key(&HashKey::String("child".to_string())) {
+                        "Center"
                     } else if map.contains_key(&HashKey::String("text".to_string())) {
                         "Text"
                     } else {
@@ -397,7 +442,10 @@ pub fn object_to_node(obj: &Object) -> TopiaNode {
                     };
                     if let Some(cb_obj) = map.get(&HashKey::String("on_change".to_string())).cloned() {
                         TopiaNode::checkbox(checked, label, move |new_val| {
-                            crate::evaluator::apply_function(cb_obj.clone(), vec![Object::Boolean(new_val)]);
+                            let res = crate::evaluator::apply_function(cb_obj.clone(), vec![Object::Boolean(new_val)]);
+                            if let Object::Error(err) = res {
+                                eprintln!("[Topia Checkbox Callback Error]: {}", err);
+                            }
                         })
                     } else {
                         TopiaNode::checkbox(checked, label, |_| {})
@@ -477,7 +525,10 @@ pub fn object_to_node(obj: &Object) -> TopiaNode {
                     };
                     if let Some(cb_obj) = map.get(&HashKey::String("on_change".to_string())).cloned() {
                         TopiaNode::slider(value, min, max, move |new_val| {
-                            crate::evaluator::apply_function(cb_obj.clone(), vec![Object::Float(new_val as f64)]);
+                            let res = crate::evaluator::apply_function(cb_obj.clone(), vec![Object::Float(new_val as f64)]);
+                            if let Object::Error(err) = res {
+                                eprintln!("[Topia Slider Callback Error]: {}", err);
+                            }
                         })
                     } else {
                         TopiaNode::slider(value, min, max, |_| {})
@@ -492,6 +543,67 @@ pub fn object_to_node(obj: &Object) -> TopiaNode {
                     };
                     TopiaNode::scroll_area(children)
                 }
+                "Graph" | "graph" => {
+                    let mut points = vec![];
+                    if let Some(Object::Array(arr)) = map.get(&HashKey::String("points".to_string())) {
+                        for p in arr.borrow().iter() {
+                            if let Object::Array(point_arr) = p {
+                                let point = point_arr.borrow();
+                                if point.len() == 2 {
+                                    let x = match &point[0] {
+                                        Object::Float(f) => *f as f32,
+                                        Object::Integer(i) => *i as f32,
+                                        _ => 0.0,
+                                    };
+                                    let y = match &point[1] {
+                                        Object::Float(f) => *f as f32,
+                                        Object::Integer(i) => *i as f32,
+                                        _ => 0.0,
+                                    };
+                                    points.push((x, y));
+                                }
+                            }
+                        }
+                    }
+                    
+                    let get_float = |key: &str| -> f32 {
+                        match map.get(&HashKey::String(key.to_string())) {
+                            Some(Object::Float(f)) => *f as f32,
+                            Some(Object::Integer(i)) => *i as f32,
+                            _ => 0.0,
+                        }
+                    };
+                    
+                    TopiaNode::graph(
+                        points,
+                        get_float("min_x"),
+                        get_float("max_x"),
+                        get_float("min_y"),
+                        get_float("max_y")
+                    )
+                }
+                
+                "Scale" | "scale" => {
+                    let scale_val = match map.get(&HashKey::String("scale".to_string())) {
+                        Some(Object::Float(f)) => *f as f32,
+                        Some(Object::Integer(i)) => *i as f32,
+                        _ => 1.0,
+                    };
+                    let child_node = match map.get(&HashKey::String("child".to_string())) {
+                        Some(child_obj) => object_to_node(child_obj),
+                        None => TopiaNode::Empty,
+                    };
+                    TopiaNode::scale(scale_val, child_node)
+                }
+
+                "Center" | "center" => {
+                    let child_node = match map.get(&HashKey::String("child".to_string())) {
+                        Some(child_obj) => object_to_node(child_obj),
+                        None => TopiaNode::Empty,
+                    };
+                    TopiaNode::center(child_node)
+                }
+
                 "Empty" | "empty" => TopiaNode::Empty,
                 _ => TopiaNode::Empty,
             }

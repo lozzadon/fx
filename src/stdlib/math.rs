@@ -23,6 +23,7 @@ pub fn make_module() -> Object {
     map.insert(HashKey::String("log".to_string()), Object::Builtin("std:math:log".to_string()));
     map.insert(HashKey::String("min".to_string()), Object::Builtin("std:math:min".to_string()));
     map.insert(HashKey::String("max".to_string()), Object::Builtin("std:math:max".to_string()));
+    map.insert(HashKey::String("eval".to_string()), Object::Builtin("std:math:eval".to_string()));
     
     Object::Hash(Rc::new(RefCell::new(map)))
 }
@@ -178,6 +179,56 @@ pub fn apply(name: &str, args: Vec<Object>) -> Object {
                 (Object::Float(a), Object::Integer(b)) => Object::Float(a.max(*b as f64)),
                 _ => Object::Error("max expects numeric arguments".to_string()),
             }
+        }
+        "eval" => {
+            if args.len() != 2 {
+                return Object::Error(format!("eval expects 2 arguments (expr, x_val), got {}", args.len()));
+            }
+            let code = match &args[0] {
+                Object::String(s) => s.clone(),
+                _ => return Object::Error("first arg must be string".into()),
+            };
+            let x_val = match &args[1] {
+                Object::Float(f) => *f,
+                Object::Integer(i) => *i as f64,
+                _ => return Object::Error("second arg must be number".into()),
+            };
+            
+            let mut env = crate::object::Environment::new();
+            env.set("x".to_string(), Object::Float(x_val), false);
+            env.set("PI".to_string(), Object::Float(std::f64::consts::PI), false);
+            env.set("E".to_string(), Object::Float(std::f64::consts::E), false);
+            env.set("sin".to_string(), Object::Builtin("std:math:sin".to_string()), false);
+            env.set("cos".to_string(), Object::Builtin("std:math:cos".to_string()), false);
+            env.set("tan".to_string(), Object::Builtin("std:math:tan".to_string()), false);
+            env.set("abs".to_string(), Object::Builtin("std:math:abs".to_string()), false);
+            env.set("sqrt".to_string(), Object::Builtin("std:math:sqrt".to_string()), false);
+            
+            let mut lexer = crate::lexer::Lexer::new(&code);
+            let mut parser = crate::parser::Parser::new(lexer);
+            let program = parser.parse_program();
+            let res = crate::evaluator::eval_program(program, Rc::new(RefCell::new(env)));
+            
+            let mut map = std::collections::HashMap::new();
+            match res {
+                Object::Error(err) => {
+                    map.insert(crate::object::HashKey::String("ok".to_string()), Object::Boolean(false));
+                    map.insert(crate::object::HashKey::String("err".to_string()), Object::String(err));
+                }
+                Object::Float(f) => {
+                    map.insert(crate::object::HashKey::String("ok".to_string()), Object::Boolean(true));
+                    map.insert(crate::object::HashKey::String("val".to_string()), Object::Float(f));
+                }
+                Object::Integer(i) => {
+                    map.insert(crate::object::HashKey::String("ok".to_string()), Object::Boolean(true));
+                    map.insert(crate::object::HashKey::String("val".to_string()), Object::Float(i as f64));
+                }
+                _ => {
+                    map.insert(crate::object::HashKey::String("ok".to_string()), Object::Boolean(false));
+                    map.insert(crate::object::HashKey::String("err".to_string()), Object::String("Expression did not return a number".to_string()));
+                }
+            }
+            Object::Hash(Rc::new(RefCell::new(map)))
         }
         _ => Object::Error(format!("unknown std:math function '{}'", name)),
     }

@@ -1,0 +1,4 @@
+let bar = "BAZ"
+print("foo \{bar}")
+print("foo \\{bar}")
+print("foo \\\{bar}")

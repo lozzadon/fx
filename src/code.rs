@@ -31,6 +31,10 @@ pub enum Opcode {
     OpIterInit,
     OpIterNext,
     OpHash,
+    OpDup,
+    OpTry,
+    OpCatchEnd,
+    OpThrow,
 }
 
 impl From<u8> for Opcode {
@@ -67,6 +71,10 @@ impl From<u8> for Opcode {
             28 => Opcode::OpIterInit,
             29 => Opcode::OpIterNext,
             30 => Opcode::OpHash,
+            31 => Opcode::OpDup,
+            32 => Opcode::OpTry,
+            33 => Opcode::OpCatchEnd,
+            34 => Opcode::OpThrow,
             _ => panic!("Unknown opcode: {}", v),
         }
     }
@@ -111,6 +119,10 @@ pub fn lookup(op: u8) -> Definition {
         Opcode::OpIterInit => Definition { name: "OpIterInit", operand_widths: vec![] },
         Opcode::OpIterNext => Definition { name: "OpIterNext", operand_widths: vec![2] },
         Opcode::OpHash => Definition { name: "OpHash", operand_widths: vec![2] },
+        Opcode::OpDup => Definition { name: "OpDup", operand_widths: vec![] },
+        Opcode::OpTry => Definition { name: "OpTry", operand_widths: vec![2] },
+        Opcode::OpCatchEnd => Definition { name: "OpCatchEnd", operand_widths: vec![] },
+        Opcode::OpThrow => Definition { name: "OpThrow", operand_widths: vec![] },
     }
 }
 
@@ -131,9 +143,11 @@ pub fn make(op: Opcode, operands: &[usize]) -> Vec<u8> {
     for (i, o) in operands.iter().enumerate() {
         let width = def.operand_widths[i];
         if width == 2 {
+            if *o > 65535 { panic!("Operand too large for 2 bytes: {}", o); }
             instruction[offset] = (*o >> 8) as u8;
             instruction[offset + 1] = *o as u8;
         } else if width == 1 {
+            if *o > 255 { panic!("Operand too large for 1 byte: {}", o); }
             instruction[offset] = *o as u8;
         }
         offset += width;
