@@ -183,6 +183,26 @@ pub fn apply(name: &str, args: Vec<Object>) -> Object {
             Object::Hash(Rc::new(RefCell::new(map)))
         }
 
+        
+        "Separator" | "separator" => {
+            let mut map = HashMap::new();
+            map.insert(HashKey::String("type".to_string()), Object::String("Separator".to_string()));
+            Object::Hash(Rc::new(RefCell::new(map)))
+        }
+        "ProgressBar" | "progress_bar" => {
+            if args.len() < 1 {
+                return Object::Error(format!("ProgressBar expects 1 argument (progress), got {}", args.len()));
+            }
+            let progress = match &args[0] {
+                Object::Integer(i) => *i as f32,
+                Object::Float(f) => *f as f32,
+                _ => return Object::Error(format!("ProgressBar progress must be numeric, got {}", args[0].type_name())),
+            };
+            let mut map = HashMap::new();
+            map.insert(HashKey::String("type".to_string()), Object::String("ProgressBar".to_string()));
+            map.insert(HashKey::String("progress".to_string()), Object::Float(progress as f64));
+            Object::Hash(Rc::new(RefCell::new(map)))
+        }
         "Empty" | "empty" => {
             let mut map = HashMap::new();
             map.insert(HashKey::String("_type".to_string()), Object::String("Empty".to_string()));
