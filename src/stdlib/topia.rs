@@ -247,6 +247,32 @@ pub fn apply(name: &str, args: Vec<Object>) -> Object {
             map.insert(HashKey::String("on_change".to_string()), args[2].clone());
             Object::Hash(Rc::new(RefCell::new(map)))
         }
+
+        "GroupBox" | "group_box" => {
+            if args.len() < 2 { return Object::Error(format!("GroupBox expects 2 arguments")); }
+            let mut map = HashMap::new();
+            map.insert(HashKey::String("type".to_string()), Object::String("GroupBox".to_string()));
+            map.insert(HashKey::String("title".to_string()), args[0].clone());
+            map.insert(HashKey::String("child".to_string()), args[1].clone());
+            Object::Hash(Rc::new(RefCell::new(map)))
+        }
+        "DisclosureGroup" | "disclosure_group" => {
+            if args.len() < 2 { return Object::Error(format!("DisclosureGroup expects 2 arguments")); }
+            let mut map = HashMap::new();
+            map.insert(HashKey::String("type".to_string()), Object::String("DisclosureGroup".to_string()));
+            map.insert(HashKey::String("title".to_string()), args[0].clone());
+            map.insert(HashKey::String("child".to_string()), args[1].clone());
+            Object::Hash(Rc::new(RefCell::new(map)))
+        }
+        "TabView" | "tab_view" => {
+            if args.len() < 3 { return Object::Error(format!("TabView expects 3 arguments")); }
+            let mut map = HashMap::new();
+            map.insert(HashKey::String("type".to_string()), Object::String("TabView".to_string()));
+            map.insert(HashKey::String("tabs".to_string()), args[0].clone());
+            map.insert(HashKey::String("selected".to_string()), args[1].clone());
+            map.insert(HashKey::String("on_change".to_string()), args[2].clone());
+            Object::Hash(Rc::new(RefCell::new(map)))
+        }
         "Empty" | "empty" => {
             let mut map = HashMap::new();
             map.insert(HashKey::String("_type".to_string()), Object::String("Empty".to_string()));
