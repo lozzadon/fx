@@ -36,6 +36,8 @@ fn main() {
                 eprintln!("Usage: fx --vm <file.fx>");
                 std::process::exit(1);
             }
+        } else if args[1] == "store" {
+            open_store();
         } else if args[1] == "update" {
             update_system();
         } else if args[1] == "uninstall" {
@@ -400,4 +402,59 @@ fn uninstall_package(pkg_name: &str) {
     let _output = run_with_spinner(&msg, cmd);
 
     println!("Successfully uninstalled {}!", pkg_name);
+}
+
+fn open_store() {
+    let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let repo_dir = format!("{}/.fx/fx-pkgs-repo", home);
+
+    if !std::path::Path::new(&repo_dir).exists() {
+        println!("Fetching store directory...");
+        let _ = std::process::Command::new("git")
+            .arg("clone")
+            .arg("https://github.com/lozzadon/fx-pkgs.git")
+            .arg(&repo_dir)
+            .status();
+    } else {
+        let _ = std::process::Command::new("git")
+            .current_dir(&repo_dir)
+            .arg("pull")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+
+    let mut packages = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&repo_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(pkg_name) = path.file_name().and_then(|s| s.to_str()) {
+                    if !pkg_name.starts_with('.') {
+                        packages.push(pkg_name.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    if packages.is_empty() {
+        println!("No packages found in the store.");
+        return;
+    }
+
+    packages.sort();
+
+    use dialoguer::{theme::ColorfulTheme, Select};
+
+    let selection = Select::with_theme(&ColorfulTheme::default())
+        .with_prompt("Select a package to install")
+        .default(0)
+        .items(&packages)
+        .interact()
+        .unwrap();
+
+    let selected_pkg = &packages[selection];
+    println!("\nInstalling {}...", selected_pkg);
+    install_package(selected_pkg);
 }
