@@ -273,6 +273,24 @@ pub fn apply(name: &str, args: Vec<Object>) -> Object {
             map.insert(HashKey::String("on_change".to_string()), args[2].clone());
             Object::Hash(Rc::new(RefCell::new(map)))
         }
+
+        "MenuButton" | "menu_button" => {
+            if args.len() < 3 { return Object::Error(format!("MenuButton expects 3 arguments")); }
+            let mut map = HashMap::new();
+            map.insert(HashKey::String("type".to_string()), Object::String("MenuButton".to_string()));
+            map.insert(HashKey::String("title".to_string()), args[0].clone());
+            map.insert(HashKey::String("items".to_string()), args[1].clone());
+            map.insert(HashKey::String("on_select".to_string()), args[2].clone());
+            Object::Hash(Rc::new(RefCell::new(map)))
+        }
+        "MenuBar" | "menu_bar" => {
+            if args.len() < 2 { return Object::Error(format!("MenuBar expects 2 arguments")); }
+            let mut map = HashMap::new();
+            map.insert(HashKey::String("type".to_string()), Object::String("MenuBar".to_string()));
+            map.insert(HashKey::String("menus".to_string()), args[0].clone());
+            map.insert(HashKey::String("on_select".to_string()), args[1].clone());
+            Object::Hash(Rc::new(RefCell::new(map)))
+        }
         "Empty" | "empty" => {
             let mut map = HashMap::new();
             map.insert(HashKey::String("_type".to_string()), Object::String("Empty".to_string()));
