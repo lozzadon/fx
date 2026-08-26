@@ -222,6 +222,38 @@ fn start_repl() {
     }
 }
 
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::thread;
+use std::time::Duration;
+use std::io::{self, Write};
+
+fn run_with_spinner(msg: &str, mut cmd: std::process::Command) -> std::process::Output {
+    let running = Arc::new(AtomicBool::new(true));
+    let running_clone = running.clone();
+    let msg_clone = msg.to_string();
+    
+    let handle = thread::spawn(move || {
+        let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        let mut i = 0;
+        while running_clone.load(Ordering::Relaxed) {
+            print!("\r\x1b[36m{}\x1b[0m {}", frames[i % frames.len()], msg_clone);
+            let _ = io::stdout().flush();
+            i += 1;
+            thread::sleep(Duration::from_millis(80));
+        }
+        // clear the line when done
+        print!("\r\x1b[K"); 
+        let _ = io::stdout().flush();
+    });
+
+    let output = cmd.output().expect("Failed to execute command");
+    
+    running.store(false, Ordering::Relaxed);
+    handle.join().unwrap();
+    
+    output
+}
+
 fn install_package(pkg_name: &str) {
     println!("Installing package {} from fx-pkgs...", pkg_name);
     let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
@@ -237,23 +269,20 @@ fn install_package(pkg_name: &str) {
     }
 
     if !std::path::Path::new(&repo_dir).exists() {
-        println!("Initializing local package cache...");
-        let status = std::process::Command::new("git")
-            .arg("clone")
-            .arg("https://github.com/lozzadon/fx-pkgs.git")
-            .arg(&repo_dir)
-            .status();
-        if status.is_err() || !status.unwrap().success() {
+        let mut cmd = std::process::Command::new("git");
+        cmd.arg("clone").arg("https://github.com/lozzadon/fx-pkgs.git").arg(&repo_dir);
+        let output = run_with_spinner("Initializing local package cache...", cmd);
+        
+        if !output.status.success() {
             eprintln!("Failed to clone fx-pkgs repository.");
             std::process::exit(1);
         }
     } else {
-        println!("Updating local package cache...");
-        let status = std::process::Command::new("git")
-            .current_dir(&repo_dir)
-            .arg("pull")
-            .status();
-        if status.is_err() || !status.unwrap().success() {
+        let mut cmd = std::process::Command::new("git");
+        cmd.current_dir(&repo_dir).arg("pull");
+        let output = run_with_spinner("Updating local package cache...", cmd);
+        
+        if !output.status.success() {
             eprintln!("Failed to update fx-pkgs repository.");
             std::process::exit(1);
         }
@@ -281,12 +310,11 @@ fn update_system() {
     // Update topia
     let topia_dir = format!("{}/topia", home);
     if std::path::Path::new(&topia_dir).exists() {
-        println!("Updating topia...");
-        let status = std::process::Command::new("git")
-            .current_dir(&topia_dir)
-            .arg("pull")
-            .status();
-        if status.is_err() || !status.unwrap().success() {
+        let mut cmd = std::process::Command::new("git");
+        cmd.current_dir(&topia_dir).arg("pull");
+        let output = run_with_spinner("Updating topia...", cmd);
+        
+        if !output.status.success() {
             eprintln!("Failed to pull topia updates.");
         } else {
             println!("topia updated successfully.");
@@ -296,24 +324,20 @@ fn update_system() {
     // Update fx
     let fx_dir = format!("{}/fx", home);
     if std::path::Path::new(&fx_dir).exists() {
-        println!("Updating fx...");
-        let status = std::process::Command::new("git")
-            .current_dir(&fx_dir)
-            .arg("pull")
-            .status();
+        let mut cmd = std::process::Command::new("git");
+        cmd.current_dir(&fx_dir).arg("pull");
+        let output = run_with_spinner("Updating fx...", cmd);
         
-        if status.is_err() || !status.unwrap().success() {
+        if !output.status.success() {
             eprintln!("Failed to pull fx updates.");
         } else {
-            println!("fx pulled successfully. Recompiling...");
-            let build_status = std::process::Command::new("cargo")
-                .current_dir(&fx_dir)
-                .arg("install")
-                .arg("--path")
-                .arg(".")
-                .status();
+            println!("fx pulled successfully.");
+            
+            let mut build_cmd = std::process::Command::new("cargo");
+            build_cmd.current_dir(&fx_dir).arg("install").arg("--path").arg(".");
+            let build_output = run_with_spinner("Recompiling fx engine...", build_cmd);
                 
-            if build_status.is_err() || !build_status.unwrap().success() {
+            if !build_output.status.success() {
                 eprintln!("Failed to recompile fx.");
             } else {
                 println!("fx updated and installed successfully!");
