@@ -203,6 +203,50 @@ pub fn apply(name: &str, args: Vec<Object>) -> Object {
             map.insert(HashKey::String("progress".to_string()), Object::Float(progress as f64));
             Object::Hash(Rc::new(RefCell::new(map)))
         }
+
+        "Toggle" | "toggle" => {
+            if args.len() < 2 { return Object::Error(format!("Toggle expects 2 arguments")); }
+            let mut map = HashMap::new();
+            map.insert(HashKey::String("type".to_string()), Object::String("Toggle".to_string()));
+            map.insert(HashKey::String("checked".to_string()), args[0].clone());
+            map.insert(HashKey::String("on_change".to_string()), args[1].clone());
+            Object::Hash(Rc::new(RefCell::new(map)))
+        }
+        "Stepper" | "stepper" => {
+            if args.len() < 3 { return Object::Error(format!("Stepper expects 3 arguments")); }
+            let mut map = HashMap::new();
+            map.insert(HashKey::String("type".to_string()), Object::String("Stepper".to_string()));
+            map.insert(HashKey::String("value".to_string()), args[0].clone());
+            map.insert(HashKey::String("step".to_string()), args[1].clone());
+            map.insert(HashKey::String("on_change".to_string()), args[2].clone());
+            Object::Hash(Rc::new(RefCell::new(map)))
+        }
+        "ColorWell" | "color_well" => {
+            if args.len() < 2 { return Object::Error(format!("ColorWell expects 2 arguments")); }
+            let mut map = HashMap::new();
+            map.insert(HashKey::String("type".to_string()), Object::String("ColorWell".to_string()));
+            map.insert(HashKey::String("color".to_string()), args[0].clone());
+            map.insert(HashKey::String("on_change".to_string()), args[1].clone());
+            Object::Hash(Rc::new(RefCell::new(map)))
+        }
+        "ComboBox" | "combo_box" => {
+            if args.len() < 3 { return Object::Error(format!("ComboBox expects 3 arguments")); }
+            let mut map = HashMap::new();
+            map.insert(HashKey::String("type".to_string()), Object::String("ComboBox".to_string()));
+            map.insert(HashKey::String("selected".to_string()), args[0].clone());
+            map.insert(HashKey::String("options".to_string()), args[1].clone());
+            map.insert(HashKey::String("on_change".to_string()), args[2].clone());
+            Object::Hash(Rc::new(RefCell::new(map)))
+        }
+        "SegmentedControl" | "segmented_control" => {
+            if args.len() < 3 { return Object::Error(format!("SegmentedControl expects 3 arguments")); }
+            let mut map = HashMap::new();
+            map.insert(HashKey::String("type".to_string()), Object::String("SegmentedControl".to_string()));
+            map.insert(HashKey::String("selected".to_string()), args[0].clone());
+            map.insert(HashKey::String("segments".to_string()), args[1].clone());
+            map.insert(HashKey::String("on_change".to_string()), args[2].clone());
+            Object::Hash(Rc::new(RefCell::new(map)))
+        }
         "Empty" | "empty" => {
             let mut map = HashMap::new();
             map.insert(HashKey::String("_type".to_string()), Object::String("Empty".to_string()));
